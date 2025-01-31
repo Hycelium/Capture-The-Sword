@@ -69,8 +69,7 @@ export default class MyEntityController extends BaseEntityController {
   public walkVelocity: number = 4;
 
   /** Maximum stamina for sprinting */
-  public maxStamina: number = 25
-0;
+  public maxStamina: number = 250;
 
   /** Current stamina level */
   public currentStamina: number;

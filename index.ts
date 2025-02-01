@@ -47,17 +47,25 @@ const SCORE_ZONES = {
 const MAP_CENTER_X = 0; // Middle of the map X coordinate
 const SCORE_CHECK_INTERVAL = 100; // How often to check for scoring (milliseconds)
 
-const BACKGROUND_MUSIC = new Audio({
-  uri: 'audio/age-of-sword-5.mp3',
-  loop: true,
-  volume: 0.3, // Adjust volume as needed
-});
+function createBackgroundMusic() {
+  return new Audio({
+    uri: 'audio/age-of-sword-5.mp3',
+    loop: true,
+    volume: 0.3,
+  });
+}
 
-const VICTORY_FANFARE = new Audio({
-  uri: 'audio/trumpet.mp3',
-  volume: 0.5,
-  loop: false,
-});
+function createVictoryFanfare() {
+  return new Audio({
+    uri: 'audio/trumpet.mp3',
+    volume: 0.5,
+    loop: false,
+  });
+}
+
+// Replace the constant declarations with let
+let BACKGROUND_MUSIC = createBackgroundMusic();
+let VICTORY_FANFARE = createVictoryFanfare();
 
 let scoreCheckInterval: NodeJS.Timer | undefined;
 let scoreAnnounceInterval: NodeJS.Timer | undefined;
@@ -373,6 +381,227 @@ function startGame(world: World) {
   updateUiState(world);
 }
 
+// Update potion spawn positions
+const POTION_SPAWN_POSITIONS = [
+  { x: 31, y: 7, z: -21 },  // Red side wooden structure
+  { x: 35, y: 7, z: 18 },   // Red side brick structure
+  { x: -29, y: 7, z: -17 }, // Blue side brick structure
+  { x: -28, y: 7, z: 23 },  // Blue side wood structure
+];
+
+function createWaterPotion(world: World, position: { x: number, y: number, z: number }) {
+  // Remove any existing potions at this position
+  world.entityManager.getAllEntities().forEach(entity => {
+    if (entity.name === 'water_potion' && 
+        entity.position.x === position.x && 
+        entity.position.z === position.z) {
+      entity.despawn();
+    }
+  });
+
+  const potion = new Entity({
+    name: 'water_potion',
+    modelUri: 'models/items/potion-water.gltf',
+    modelScale: 1.2,
+    rigidBodyOptions: {
+      type: RigidBodyType.KINEMATIC,
+      enabledRotations: { x: false, y: true, z: false },
+      colliders: [
+        // Block collision
+        {
+          shape: ColliderShape.CAPSULE,
+          radius: 0.2,
+          halfHeight: 0.3,
+          collisionGroups: {
+            belongsTo: [CollisionGroup.ENTITY],
+            collidesWith: [CollisionGroup.BLOCK],
+          },
+        },
+        // Player interaction
+        {
+          shape: ColliderShape.CYLINDER,
+          radius: 1,
+          halfHeight: 0.5,
+          isSensor: true,
+          collisionGroups: {
+            belongsTo: [CollisionGroup.ENTITY_SENSOR],
+            collidesWith: [CollisionGroup.ENTITY],
+          },
+          onCollision: (other: Entity | BlockType, started: boolean) => {
+            if (started && other instanceof PlayerEntity) {
+              const controller = other.controller as MyEntityController;
+              if (!controller) return;
+
+              // Create child entity attached to player
+              const potionChild = new Entity({
+                name: 'water_potion_child',
+                modelUri: 'models/items/potion-water.gltf',
+                modelScale: 0.8,
+                parent: other,
+                parentNodeName: 'hand_left_anchor',
+              });
+
+              potionChild.spawn(
+                world,
+                { x: 0.3, y: 0.1, z: 0.2 }, // Offset from hand
+                Quaternion.fromEuler(-90, 0, 0), // Rotate to stand upright in hand
+              );
+
+              // Store potion reference in controller
+              controller.potion = potionChild;
+
+              // Remove the pickup-able potion
+              potion.despawn();
+
+              // Play pickup sound
+              const pickupSound = new Audio({
+                uri: 'audio/glass-break-1.mp3',
+                volume: 0.5,
+                position: other.position,
+              });
+              pickupSound.play(world);
+
+              world.chatManager.sendBroadcastMessage(
+                `${other.name} picked up a water potion! Press E to use it.`,
+                '00FFFF' // Cyan color
+              );
+            }
+          }
+        }
+      ]
+    }
+  });
+
+  // Spawn the potion at the specified position
+  potion.spawn(world, position);
+  potion.setRotation(Quaternion.fromEuler(0, 0, 0));
+  
+  // Add rotation animation
+  const floatInterval = setInterval(() => {
+    if (!potion.isSpawned) {
+      clearInterval(floatInterval);
+      return;
+    }
+    
+    // Rotate the potion slowly
+    const currentRotation = potion.rotation;
+    const newRotation = Quaternion.fromEuler(0, (Date.now() / 1000) * 50 % 360, 0);
+    potion.setRotation(newRotation);
+  }, 16);
+}
+
+// Add after other constants
+const APPLE_SPAWN_POSITIONS = [
+  { x: -7, y: 3, z: -11 },  // North center
+  { x: 9, y: 3, z: 15 },   // South center
+];
+const APPLE_SPAWN_INTERVAL = 60000; // 60 seconds
+
+function createDivineShield(world: World, position: { x: number, y: number, z: number }) {
+  // Remove any existing apples at this position
+  world.entityManager.getAllEntities().forEach(entity => {
+    if (entity.name === 'divine_shield' && 
+        Math.abs(entity.position.x - position.x) < 0.1 && 
+        Math.abs(entity.position.z - position.z) < 0.1) {
+      entity.despawn();
+    }
+  });
+
+  const apple = new Entity({
+    name: 'divine_shield',
+    modelUri: 'models/items/golden-apple.gltf',
+    modelScale: 1.2,
+    rigidBodyOptions: {
+      type: RigidBodyType.KINEMATIC,
+      enabledRotations: { x: false, y: true, z: false },
+      colliders: [
+        // Block collision
+        {
+          shape: ColliderShape.CAPSULE,
+          radius: 0.2,
+          halfHeight: 0.3,
+          collisionGroups: {
+            belongsTo: [CollisionGroup.ENTITY],
+            collidesWith: [CollisionGroup.BLOCK],
+          },
+        },
+        // Player interaction
+        {
+          shape: ColliderShape.CYLINDER,
+          radius: 1,
+          halfHeight: 0.5,
+          isSensor: true,
+          collisionGroups: {
+            belongsTo: [CollisionGroup.ENTITY_SENSOR],
+            collidesWith: [CollisionGroup.ENTITY],
+          },
+          onCollision: (other: Entity | BlockType, started: boolean) => {
+            if (started && other instanceof PlayerEntity) {
+              const controller = other.controller as MyEntityController;
+              if (!controller) return;
+
+              // Prevent picking up if player already has a shield
+              if (controller.divineShield) {
+                return;
+              }
+
+              // Create child entity attached to player's head
+              const appleChild = new Entity({
+                name: 'divine_shield_child',
+                modelUri: 'models/items/golden-apple.gltf',
+                modelScale: 0.8,
+                parent: other,
+                parentNodeName: 'head',
+              });
+
+              appleChild.spawn(
+                world,
+                { x: 0, y: 0.5, z: 0 }, // Float above head
+                Quaternion.fromEuler(0, 0, 0),
+              );
+
+              // Store shield reference in controller
+              controller.divineShield = appleChild;
+
+              // Remove the pickup-able apple
+              apple.despawn();
+
+              // Play pickup sound
+              const pickupSound = new Audio({
+                uri: 'audio/glass-break-1.mp3',
+                volume: 0.5,
+                position: other.position,
+              });
+              pickupSound.play(world);
+
+              world.chatManager.sendBroadcastMessage(
+                `${other.name} is protected by a divine shield!`,
+                'FFD700' // Gold color
+              );
+            }
+          }
+        }
+      ]
+    }
+  });
+
+  // Spawn the apple
+  apple.spawn(world, position);
+  
+  // Add rotation animation
+  const floatInterval = setInterval(() => {
+    if (!apple.isSpawned) {
+      clearInterval(floatInterval);
+      return;
+    }
+    
+    // Rotate the apple
+    const currentRotation = apple.rotation;
+    const newRotation = Quaternion.fromEuler(0, (Date.now() / 1000) * 50 % 360, 0);
+    apple.setRotation(newRotation);
+  }, 16);
+}
+
 function startRound(world: World) {
   lobbyState = 'inProgress';
   gameData.isRoundActive = true;
@@ -412,6 +641,26 @@ function startRound(world: World) {
     }
     createGoldenSwordPowerup(world);
   }, GOLDEN_SWORD_SPAWN_INTERVAL);
+  
+  // Start potion spawn cycle
+  POTION_SPAWN_POSITIONS.forEach(position => createWaterPotion(world, position));
+  const potionInterval = setInterval(() => {
+    if (!gameData.isRoundActive) {
+      clearInterval(potionInterval);
+      return;
+    }
+    POTION_SPAWN_POSITIONS.forEach(position => createWaterPotion(world, position));
+  }, POTION_SPAWN_INTERVAL);
+  
+  // Start divine shield spawn cycle
+  APPLE_SPAWN_POSITIONS.forEach(position => createDivineShield(world, position));
+  const shieldInterval = setInterval(() => {
+    if (!gameData.isRoundActive) {
+      clearInterval(shieldInterval);
+      return;
+    }
+    APPLE_SPAWN_POSITIONS.forEach(position => createDivineShield(world, position));
+  }, APPLE_SPAWN_INTERVAL);
   
   updateUiState(world);
 }
@@ -530,8 +779,11 @@ function resetAfterScore(world: World) {
 
 // Add cleanup function
 function cleanupGameState(world: World) {
-  // Stop background music
+  // Stop and recreate audio objects
   BACKGROUND_MUSIC.pause();
+  VICTORY_FANFARE.pause();
+  BACKGROUND_MUSIC = createBackgroundMusic();
+  VICTORY_FANFARE = createVictoryFanfare();
 
   // Clear all intervals
   [scoreCheckInterval, scoreAnnounceInterval, countdownInterval].forEach(interval => {
@@ -624,6 +876,41 @@ function cleanupGameState(world: World) {
       playerEntity.stopModelAnimations(['speed_boost_effect']);
     }
   });
+
+  // Remove any existing potions
+  world.entityManager.getAllEntities().forEach(entity => {
+    if (entity.name === 'water_potion' || entity.name === 'water_potion_child') {
+      entity.despawn();
+    }
+  });
+
+  // Clear potions from players
+  allPlayers.forEach(playerEntity => {
+    const controller = playerEntity.controller as MyEntityController;
+    if (controller?.potion) {
+      controller.potion.despawn();
+      controller.potion = undefined;
+    }
+  });
+
+  // Remove any divine shields and reset immunity
+  world.entityManager.getAllEntities().forEach(entity => {
+    if (entity.name === 'divine_shield' || entity.name === 'divine_shield_child') {
+      entity.despawn();
+    }
+  });
+
+  // Clear shields and immunity from players
+  allPlayers.forEach(playerEntity => {
+    const controller = playerEntity.controller as MyEntityController;
+    if (controller) {
+      if (controller.divineShield) {
+        controller.divineShield.despawn();
+        controller.divineShield = undefined;
+      }
+      controller._shieldImmunityEndTime = undefined;
+    }
+  });
 }
 
 // Modify endGame to use cleanup
@@ -637,7 +924,7 @@ function endGame(world: World) {
   const winner = gameData.redScore > gameData.blueScore ? 'red' : 
                 gameData.blueScore > gameData.redScore ? 'blue' : 'tie';
   
-  // Play victory fanfare
+  // Play victory fanfare with new instance
   VICTORY_FANFARE.play(world);
   
   // Announce results
@@ -660,6 +947,30 @@ function handlePlayerTag(world: World, taggedPlayer: PlayerEntity, tagger: Playe
   const controller = taggedPlayer.controller as MyEntityController;
   const taggedState = PLAYER_STATES.get(taggedPlayer) || { isTagged: false };
   
+  // Check for divine shield or immunity
+  if (controller.divineShield || controller.hasShieldImmunity) {
+    if (controller.divineShield) {
+      // Remove shield and grant immunity
+      controller.divineShield.despawn();
+      controller.divineShield = undefined;
+      controller.setShieldImmunity();
+      
+      // Play shield break sound
+      const shieldBreakSound = new Audio({
+        uri: 'audio/glass-break-1.mp3',
+        volume: 0.7,
+        position: taggedPlayer.position,
+      });
+      shieldBreakSound.play(world);
+
+      world.chatManager.sendBroadcastMessage(
+        `${taggedPlayer.name}'s divine shield protected them from being tagged!`,
+        'FFD700'
+      );
+    }
+    return; // Prevent tag
+  }
+
   // Don't tag if recently tagged or currently tagged
   const now = Date.now();
   if (taggedState.isTagged || 
@@ -825,6 +1136,9 @@ function createGoldenSwordPowerup(world: World) {
   }, 16);
 }
 
+// Add after other constants
+const POTION_SPAWN_INTERVAL = 45000; // 45 seconds
+
 startServer(world => {
   // Uncomment this to visualize physics vertices, will cause noticable lag.
   // world.simulation.enableDebugRendering(true);
@@ -895,7 +1209,17 @@ startServer(world => {
 
       // Check if this is a collision between players from different teams
       if (controller?.team && otherController?.team && controller.team !== otherController.team) {
-        // Handle sword collisions separately
+        // First check for divine shield on either player
+        if (controller.divineShield || controller.hasShieldImmunity) {
+          handlePlayerTag(world, entity, otherEntity); // This will handle shield break
+          return;
+        }
+        if (otherController.divineShield || otherController.hasShieldImmunity) {
+          handlePlayerTag(world, otherEntity, entity); // This will handle shield break
+          return;
+        }
+
+        // Then handle sword collisions if no shields
         if (controller.sword || otherController.sword) {
           world.chatManager.sendBroadcastMessage('Player collision! Resetting positions...', 'FFFF00');
           resetAfterScore(world);
@@ -907,8 +1231,6 @@ startServer(world => {
         const otherEntityX = otherEntity.position.x;
         
         // Define territories
-        // Red territory: x > 2
-        // Blue territory: x < 0
         const entityInRedTerritory = entityX > 1;
         const entityInBlueTerritory = entityX < 1;
         const otherInRedTerritory = otherEntityX > 1;
@@ -916,18 +1238,24 @@ startServer(world => {
         
         // Allow tagging only when players are in their own territory
         const entityCanTag = (controller.team === 'red' && entityInRedTerritory) || 
-                           (controller.team === 'blue' && entityInBlueTerritory);
+                            (controller.team === 'blue' && entityInBlueTerritory);
         const otherCanTag = (otherController.team === 'red' && otherInRedTerritory) || 
-                          (otherController.team === 'blue' && otherInBlueTerritory);
+                            (otherController.team === 'blue' && otherInBlueTerritory);
 
         if (entityCanTag && !otherCanTag) {
           // Entity is in their territory and other is not - tag the other player
           handlePlayerTag(world, otherEntity, entity);
-          world.chatManager.sendBroadcastMessage(`${entity.name} defended their territory!`, controller.team === 'red' ? 'FF0000' : '0000FF');
+          world.chatManager.sendBroadcastMessage(
+            `${entity.name} defended their territory!`, 
+            controller.team === 'red' ? 'FF0000' : '0000FF'
+          );
         } else if (otherCanTag && !entityCanTag) {
           // Other is in their territory and entity is not - tag the entity
           handlePlayerTag(world, entity, otherEntity);
-          world.chatManager.sendBroadcastMessage(`${otherEntity.name} defended their territory!`, otherController.team === 'red' ? 'FF0000' : '0000FF');
+          world.chatManager.sendBroadcastMessage(
+            `${otherEntity.name} defended their territory!`, 
+            otherController.team === 'red' ? 'FF0000' : '0000FF'
+          );
         }
       }
     };

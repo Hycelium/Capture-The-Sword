@@ -15,6 +15,10 @@ import type {
 } from 'hytopia';
 import type { BlockType } from './server';
 
+// Add at the top with other constants
+const STAMINA_RESTORE_AMOUNT = 200; // 80% stamina restore
+const SHIELD_IMMUNITY_DURATION = 2000; // 2 seconds immunity after shield breaks
+
 /** Options for creating a MyEntityController instance. @public */
 export interface MyEntityControllerOptions {
   /** The upward velocity applied to the entity when it jumps. */
@@ -107,10 +111,10 @@ export default class MyEntityController extends BaseEntityController {
   public canJump: (myEntityController: MyEntityController) => boolean = () => true;
 
   /** @internal */
-  private _stepAudio: Audio | undefined;
-
-  /** @internal */
-  private _swordAudio: Audio | undefined;
+  private _stepAudio?: Audio;
+  private _swordAudio?: Audio;
+  private _pickupSound?: Audio;
+  private _tagSound?: Audio;
 
   /** @internal */
   private _groundContactCount: number = 0;
@@ -141,6 +145,40 @@ export default class MyEntityController extends BaseEntityController {
   /** Set the controller's team */
   public set team(value: 'red' | 'blue' | undefined) {
     this._team = value;
+  }
+
+  /** @internal */
+  private _potion?: Entity;
+  
+  public get potion(): Entity | undefined {
+    return this._potion;
+  }
+
+  public set potion(value: Entity | undefined) {
+    this._potion = value;
+  }
+
+  /** @internal */
+  private _divineShield?: Entity;
+  
+  public get divineShield(): Entity | undefined {
+    return this._divineShield;
+  }
+
+  public set divineShield(value: Entity | undefined) {
+    this._divineShield = value;
+  }
+
+  /** Add after other properties */
+  private _shieldImmunityEndTime?: number;
+
+  public get hasShieldImmunity(): boolean {
+    return this._shieldImmunityEndTime !== undefined && 
+           Date.now() < this._shieldImmunityEndTime;
+  }
+
+  public setShieldImmunity() {
+    this._shieldImmunityEndTime = Date.now() + SHIELD_IMMUNITY_DURATION;
   }
 
   /**
@@ -180,8 +218,11 @@ export default class MyEntityController extends BaseEntityController {
   public set sword(value: Entity | undefined) {
     this._sword = value;
     
-    // Create sword audio when sword is equipped
-    if (value && !this._swordAudio) {
+    // Create new sword audio when sword is equipped
+    if (value) {
+      if (this._swordAudio) {
+        this._swordAudio.pause();
+      }
       this._swordAudio = new Audio({
         uri: 'audio/sfx/sword/swing.mp3',
         loop: false,
@@ -196,6 +237,7 @@ export default class MyEntityController extends BaseEntityController {
    * @param entity - The entity to attach the controller to.
    */
   public attach(entity: Entity) {
+    // Create step audio
     this._stepAudio = new Audio({
       uri: 'audio/sfx/step/stone/stone-step-04.mp3',
       loop: true,
@@ -203,8 +245,41 @@ export default class MyEntityController extends BaseEntityController {
       attachedToEntity: entity,
     });
 
-    entity.lockAllRotations(); // prevent physics from applying rotation to the entity, we can still explicitly set it.
-  };
+    // Create other sound effects
+    this._pickupSound = new Audio({
+      uri: 'audio/glass-break-1.mp3',
+      volume: 0.5,
+      loop: false,
+    });
+
+    this._tagSound = new Audio({
+      uri: 'audio/hit-metal-hard-anvil.mp3',
+      volume: 1.0,
+      loop: false,
+    });
+
+    entity.lockAllRotations();
+  }
+
+  public detach(entity: Entity) {
+    // Cleanup audio when controller is detached
+    if (this._stepAudio) {
+      this._stepAudio.pause();
+      this._stepAudio = undefined;
+    }
+    if (this._swordAudio) {
+      this._swordAudio.pause();
+      this._swordAudio = undefined;
+    }
+    if (this._pickupSound) {
+      this._pickupSound.pause();
+      this._pickupSound = undefined;
+    }
+    if (this._tagSound) {
+      this._tagSound.pause();
+      this._tagSound = undefined;
+    }
+  }
 
   /**
    * Called when the controlled entity is spawned.
@@ -280,7 +355,7 @@ export default class MyEntityController extends BaseEntityController {
 
     super.tickWithPlayerInput(entity, input, cameraOrientation, deltaTimeMs);
 
-    const { w, a, s, d, sp, sh, ml } = input;
+    const { w, a, s, d, sp, sh, ml, e } = input;
     const { yaw } = cameraOrientation;
     const currentVelocity = entity.linearVelocity;
     const targetVelocities = { x: 0, y: 0, z: 0 };
@@ -293,6 +368,30 @@ export default class MyEntityController extends BaseEntityController {
     // Handle sword attack with mouse left button
     if (ml && this._sword && !this._isAttacking && this._attackCooldown === 0) {
       this.attack(entity);
+    }
+
+    // Handle potion use with E key
+    if (e && this._potion && this._potion.isSpawned) {
+      // Restore stamina
+      this.currentStamina = Math.min(this.maxStamina, this.currentStamina + STAMINA_RESTORE_AMOUNT);
+
+      // Play drink sound
+      const drinkSound = new Audio({
+        uri: 'audio/glass-break-1.mp3',
+        volume: 0.5,
+        position: entity.position,
+      });
+      drinkSound.play(entity.world);
+
+      // Remove potion and clear reference
+      this._potion.despawn();
+      this._potion = undefined;
+
+      // Announce use
+      entity.world.chatManager.sendBroadcastMessage(
+        `${entity.name} used a water potion!`,
+        '00FFFF'
+      );
     }
 
     // Update stamina based on whether sprinting

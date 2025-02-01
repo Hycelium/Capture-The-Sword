@@ -112,73 +112,23 @@ export default class MyEntityController extends BaseEntityController {
 
   /** @internal */
   private _stepAudio?: Audio;
-  private _swordAudio?: Audio;
-  private _pickupSound?: Audio;
   private _tagSound?: Audio;
-
-  /** @internal */
   private _groundContactCount: number = 0;
-
-  /** @internal */
   private _platform: Entity | undefined;
-
-  /** The equipped sword entity if any */
   private _sword?: Entity;
-
-  /** @internal */
-  private _isAttacking: boolean = false;
-
-  /** @internal */
-  private _attackCooldown: number = 0;
-
-  /** The cooldown time between attacks in milliseconds */
-  public attackCooldownTime: number = 500;
-
-  /** The team this controller belongs to */
   private _team?: 'red' | 'blue';
-
-  /** Get the controller's team */
-  public get team(): 'red' | 'blue' | undefined {
-    return this._team;
-  }
-
-  /** Set the controller's team */
-  public set team(value: 'red' | 'blue' | undefined) {
-    this._team = value;
-  }
-
-  /** @internal */
   private _potion?: Entity;
-  
-  public get potion(): Entity | undefined {
-    return this._potion;
-  }
-
-  public set potion(value: Entity | undefined) {
-    this._potion = value;
-  }
-
-  /** @internal */
   private _divineShield?: Entity;
-  
-  public get divineShield(): Entity | undefined {
-    return this._divineShield;
-  }
-
-  public set divineShield(value: Entity | undefined) {
-    this._divineShield = value;
-  }
-
-  /** Add after other properties */
   private _shieldImmunityEndTime?: number;
 
-  public get hasShieldImmunity(): boolean {
-    return this._shieldImmunityEndTime !== undefined && 
-           Date.now() < this._shieldImmunityEndTime;
+  /** Get the currently equipped sword */
+  public get sword(): Entity | undefined {
+    return this._sword;
   }
 
-  public setShieldImmunity() {
-    this._shieldImmunityEndTime = Date.now() + SHIELD_IMMUNITY_DURATION;
+  /** Set the equipped sword */
+  public set sword(value: Entity | undefined) {
+    this._sword = value;
   }
 
   /**
@@ -209,27 +159,34 @@ export default class MyEntityController extends BaseEntityController {
   /** The platform the entity is on, if any. */
   public get platform(): Entity | undefined { return this._platform; }
 
-  /** Get the currently equipped sword */
-  public get sword(): Entity | undefined {
-    return this._sword;
+  /** Get the controller's team */
+  public get team(): 'red' | 'blue' | undefined {
+    return this._team;
   }
 
-  /** Set the equipped sword */
-  public set sword(value: Entity | undefined) {
-    this._sword = value;
-    
-    // Create new sword audio when sword is equipped
-    if (value) {
-      if (this._swordAudio) {
-        this._swordAudio.pause();
-      }
-      this._swordAudio = new Audio({
-        uri: 'audio/sfx/sword/swing.mp3',
-        loop: false,
-        volume: 0.3,
-        attachedToEntity: value,
-      });
-    }
+  /** Set the controller's team */
+  public set team(value: 'red' | 'blue' | undefined) {
+    this._team = value;
+  }
+
+  /** @internal */
+  private _pickupSound?: Audio;
+  
+  public get potion(): Entity | undefined {
+    return this._potion;
+  }
+
+  public set potion(value: Entity | undefined) {
+    this._potion = value;
+  }
+
+  public get hasShieldImmunity(): boolean {
+    return this._shieldImmunityEndTime !== undefined && 
+           Date.now() < this._shieldImmunityEndTime;
+  }
+
+  public setShieldImmunity() {
+    this._shieldImmunityEndTime = Date.now() + SHIELD_IMMUNITY_DURATION;
   }
 
   /**
@@ -266,10 +223,6 @@ export default class MyEntityController extends BaseEntityController {
     if (this._stepAudio) {
       this._stepAudio.pause();
       this._stepAudio = undefined;
-    }
-    if (this._swordAudio) {
-      this._swordAudio.pause();
-      this._swordAudio = undefined;
     }
     if (this._pickupSound) {
       this._pickupSound.pause();
@@ -360,16 +313,6 @@ export default class MyEntityController extends BaseEntityController {
     const currentVelocity = entity.linearVelocity;
     const targetVelocities = { x: 0, y: 0, z: 0 };
     
-    // Update attack cooldown
-    if (this._attackCooldown > 0) {
-      this._attackCooldown = Math.max(0, this._attackCooldown - deltaTimeMs);
-    }
-    
-    // Handle sword attack with mouse left button
-    if (ml && this._sword && !this._isAttacking && this._attackCooldown === 0) {
-      this.attack(entity);
-    }
-
     // Handle potion use with E key
     if (e && this._potion && this._potion.isSpawned) {
       // Restore stamina
@@ -509,28 +452,6 @@ export default class MyEntityController extends BaseEntityController {
         z: 0,
         w: Math.fround(Math.cos(halfYaw)),
       });
-    }
-  }
-
-  /** Method to handle sword attack */
-  public attack(entity: PlayerEntity) {
-    if (this._sword && !this._isAttacking) {
-      this._isAttacking = true;
-      this._attackCooldown = this.attackCooldownTime;
-
-      // Play sword swing sound
-      if (this._swordAudio && entity.world) {
-        this._swordAudio.play(entity.world, true);
-      }
-
-      // Play attack animations
-      entity.startModelOneshotAnimations(['attack_upper']);
-      this._sword.startModelOneshotAnimations(['swing']);
-
-      // Reset attack state after animation
-      setTimeout(() => {
-        this._isAttacking = false;
-      }, 300); // Animation duration
     }
   }
 

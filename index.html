@@ -21,7 +21,24 @@
     players.forEach(player => {
       const playerEntry = document.createElement('div');
       playerEntry.classList.add('player-entry');
-      playerEntry.innerText = player;
+      
+      // Split the player info to check for sword indicator
+      const [playerName, username, hasSword] = player.split('|');
+      
+      // Create the player name span
+      const nameSpan = document.createElement('span');
+      nameSpan.innerText = `${playerName} (${username})`;
+      
+      // Add sword emoji and purple color if player has sword
+      if (hasSword === 'true') {
+        nameSpan.classList.add('has-sword');
+        const swordSpan = document.createElement('span');
+        swordSpan.classList.add('sword-icon');
+        swordSpan.innerText = ' ⚔️';
+        nameSpan.appendChild(swordSpan);
+      }
+      
+      playerEntry.appendChild(nameSpan);
       teamListElement.appendChild(playerEntry);
     });
   }
@@ -97,21 +114,21 @@
       document.getElementById('time-remaining').innerText = formatTime(data.timeRemaining);
     }
 
+    // Handle stamina updates
     if (data.stamina !== undefined) {
-      const staminaBar = document.getElementById('stamina-bar');
-      if (staminaBar) {
-        const staminaPercentage = (data.stamina.current / data.stamina.max) * 100;
-        staminaBar.style.width = `${staminaPercentage}%`;
-        
-        // Remove existing classes
-        staminaBar.classList.remove('low', 'depleted');
-        
-        // Add appropriate class based on stamina level
-        if (staminaPercentage <= 0) {
-          staminaBar.classList.add('depleted');
-        } else if (staminaPercentage <= 50) {
-          staminaBar.classList.add('low');
-        }
+      const staminaFill = document.getElementById('stamina-fill');
+      const staminaPercent = (data.stamina.current / data.stamina.max) * 100;
+      
+      staminaFill.style.width = `${staminaPercent}%`;
+      
+      // Remove all state classes first
+      staminaFill.classList.remove('low', 'critical');
+      
+      // Add appropriate class based on percentage
+      if (staminaPercent <= 25) {
+        staminaFill.classList.add('critical');
+      } else if (staminaPercent <= 50) {
+        staminaFill.classList.add('low');
       }
     }
   });
@@ -174,12 +191,12 @@
       <p class="red-score">Red: <span id="red-team-score">0</span></p>
       <p class="blue-score">Blue: <span id="blue-team-score">0</span></p>
     </div>
-    
-    <!-- Add stamina bar here -->
-    <div class="stamina-bar-container">
-      <div class="stamina-bar" id="stamina-bar"></div>
+    <div class="stamina-container">
+      <div class="stamina-label">STAMINA</div>
+      <div class="stamina-bar">
+        <div id="stamina-fill"></div>
+      </div>
     </div>
-    
     <div class="teams-container">
       <div class="team-list-container">
         <h3>Red Team</h3>
@@ -381,30 +398,55 @@
     font-weight: bold;
   }
 
-  .stamina-bar-container {
-    position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 200px;
-    height: 15px;
-    background: rgba(0, 0, 0, 0.5);
-    border-radius: 10px;
-    overflow: hidden;
+  .stamina-container {
+    margin: 10px 0;
+    padding: 0 10px;
   }
 
   .stamina-bar {
     width: 100%;
-    height: 100%;
-    background: #4ade80;
-    transition: width 0.2s ease-out, background-color 0.2s ease-out;
+    height: 10px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    overflow: hidden;
   }
 
-  .stamina-bar.low {
+  #stamina-fill {
+    height: 100%;
+    width: 100%;
+    background: #4ade80;
+    transition: width 0.2s, background-color 0.2s;
+  }
+
+  #stamina-fill.low {
     background: #fbbf24;
   }
 
-  .stamina-bar.depleted {
+  #stamina-fill.critical {
     background: #ef4444;
+  }
+
+  .stamina-label {
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    margin-bottom: 4px;
+  }
+
+  .sword-icon {
+    display: inline-block;
+    margin-left: 5px;
+    animation: swordFloat 2s ease-in-out infinite;
+  }
+
+  @keyframes swordFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-3px); }
+  }
+
+  .has-sword {
+    color: #a855f7; /* Purple color */
+    text-shadow: 0 0 5px rgba(168, 85, 247, 0.5); /* Subtle glow effect */
+    font-weight: bold;
   }
 </style> 

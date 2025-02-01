@@ -229,7 +229,7 @@ export default class MyEntityController extends BaseEntityController {
       isSensor: true,
       relativePosition: { x: 0, y: -0.75, z: 0 },
       tag: 'groundSensor',
-      onCollision: (other: Entity | BlockType, started: boolean) => {
+      onCollision: ((other: Entity | Block, started: boolean) => {
         // Ground contact
         this._groundContactCount += started ? 1 : -1;
   
@@ -247,7 +247,7 @@ export default class MyEntityController extends BaseEntityController {
         } else if (other === this._platform && !started) {
           this._platform = undefined;
         }
-      },
+      }) as CollisionCallback,
     });
 
 

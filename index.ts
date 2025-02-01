@@ -47,9 +47,21 @@ const SCORE_ZONES = {
 const MAP_CENTER_X = 0; // Middle of the map X coordinate
 const SCORE_CHECK_INTERVAL = 100; // How often to check for scoring (milliseconds)
 
-let scoreCheckInterval: NodeJS.Timeout | undefined;
-let scoreAnnounceInterval: NodeJS.Timeout | undefined;
-let countdownInterval: NodeJS.Timeout | undefined;
+const BACKGROUND_MUSIC = new Audio({
+  uri: 'audio/age-of-sword-5.mp3',
+  loop: true,
+  volume: 0.3, // Adjust volume as needed
+});
+
+const VICTORY_FANFARE = new Audio({
+  uri: 'audio/trumpet.mp3',
+  volume: 0.5,
+  loop: false,
+});
+
+let scoreCheckInterval: NodeJS.Timer | undefined;
+let scoreAnnounceInterval: NodeJS.Timer | undefined;
+let countdownInterval: NodeJS.Timer | undefined;
 
 // Team tracking
 const RED_TEAM_PLAYERS = new Set<PlayerEntity>();
@@ -307,8 +319,14 @@ function updateUiState(world: World) {
     },
     timeRemaining: gameData.timeRemaining,
     teams: {
-      red: Array.from(RED_TEAM_PLAYERS).map(p => `${p.name} (${p.player.username})`),
-      blue: Array.from(BLUE_TEAM_PLAYERS).map(p => `${p.name} (${p.player.username})`),
+      red: Array.from(RED_TEAM_PLAYERS).map(p => {
+        const controller = p.controller as MyEntityController;
+        return `${p.name}|${p.player.username}|${!!controller?.sword}`; // Add sword status
+      }),
+      blue: Array.from(BLUE_TEAM_PLAYERS).map(p => {
+        const controller = p.controller as MyEntityController;
+        return `${p.name}|${p.player.username}|${!!controller?.sword}`; // Add sword status
+      }),
     },
   };
 
@@ -361,6 +379,9 @@ function startRound(world: World) {
   gameData.timeRemaining = ROUND_DURATION;
   gameData.redScore = 0;
   gameData.blueScore = 0;
+  
+  // Start background music
+  BACKGROUND_MUSIC.play(world);
   
   // Reset positions and spawn swords
   resetAfterScore(world);
@@ -436,6 +457,15 @@ function addScore(world: World, team: 'red' | 'blue') {
     gameData.blueScore++;
   }
   
+  // Play explosion sound effect
+  const explodeSound = new Audio({
+    uri: 'audio/explode.mp3',
+    volume: 0.8,
+    position: { x: MAP_CENTER_X, y: 7, z: 0 }, // Play from center of map
+    referenceDistance: 50, // Larger reference distance so everyone can hear it
+  });
+  explodeSound.play(world);
+  
   world.chatManager.sendBroadcastMessage(`${team.toUpperCase()} team scored! Red: ${gameData.redScore}, Blue: ${gameData.blueScore}`, 'FFFF00');
   updateUiState(world);
 }
@@ -443,6 +473,15 @@ function addScore(world: World, team: 'red' | 'blue') {
 function resetAfterScore(world: World) {
   // First, remove ALL swords from the world (both carried and spawned)
   const allPlayers = [...RED_TEAM_PLAYERS, ...BLUE_TEAM_PLAYERS];
+  
+  // Play explosion sound effect for the reset
+  const explodeSound = new Audio({
+    uri: 'audio/explode.mp3',
+    volume: 0.6, // Slightly quieter for the reset
+    position: { x: MAP_CENTER_X, y: 7, z: 0 },
+    referenceDistance: 50,
+  });
+  explodeSound.play(world);
   
   // Remove carried swords from players
   allPlayers.forEach(playerEntity => {
@@ -481,6 +520,9 @@ function resetAfterScore(world: World) {
 
 // Add cleanup function
 function cleanupGameState(world: World) {
+  // Stop background music
+  BACKGROUND_MUSIC.pause();
+
   // Clear all intervals
   [scoreCheckInterval, scoreAnnounceInterval, countdownInterval].forEach(interval => {
     if (interval) {
@@ -561,9 +603,15 @@ function cleanupGameState(world: World) {
 function endGame(world: World) {
   gameData.isRoundActive = false;
   
+  // Stop background music
+  BACKGROUND_MUSIC.pause();
+  
   // Determine winner before cleanup
   const winner = gameData.redScore > gameData.blueScore ? 'red' : 
                 gameData.blueScore > gameData.redScore ? 'blue' : 'tie';
+  
+  // Play victory fanfare
+  VICTORY_FANFARE.play(world);
   
   // Announce results
   if (winner === 'tie') {
@@ -573,11 +621,11 @@ function endGame(world: World) {
   }
   world.chatManager.sendBroadcastMessage(`Final Scores - Red: ${gameData.redScore}, Blue: ${gameData.blueScore}`, 'FFFF00');
   
-  // Reset game state after 1 minute
+  // Reset game state after delay
   setTimeout(() => {
     cleanupGameState(world);
     world.chatManager.sendBroadcastMessage('Game reset! Join a team to start a new game!', '00FF00');
-  }, 60000); // 1 minute delay
+  }, 10000); // 10 second delay
 }
 
 // Update tag handling function
@@ -591,6 +639,15 @@ function handlePlayerTag(world: World, taggedPlayer: PlayerEntity, tagger: Playe
       (taggedState.lastTagTime && now - taggedState.lastTagTime < 1000)) {
     return;
   }
+
+  // Play hit sound effect
+  const hitSound = new Audio({
+    uri: 'audio/hit-metal-hard-anvil.mp3',
+    volume: 1.0,
+    position: taggedPlayer.position, // Play sound at tagged player's position
+    referenceDistance: 10, // Distance at which the sound starts to attenuate
+  });
+  hitSound.play(world);
 
   // Apply tag only to the tagged player
   taggedState.isTagged = true;
@@ -749,7 +806,7 @@ startServer(world => {
     world.chatManager.sendBroadcastMessage('=== Welcome to Capture the Sword! ===', '00FF00');
     world.chatManager.sendBroadcastMessage('Game Rules:', '00FF00');
     world.chatManager.sendBroadcastMessage('1. Join a team by approaching the team captains', '00FF00');
-    world.chatManager.sendBroadcastMessage('2. Steal the enemy team\'s sword and bring it to your scoring zone', '00FF00');
+    world.chatManager.sendBroadcastMessage('2. Steal the enemy team\'s sword and bring it to your side', '00FF00');
     world.chatManager.sendBroadcastMessage('3. Tag enemy players to freeze them for 8 seconds', '00FF00');
     world.chatManager.sendBroadcastMessage('4. If you\'re carrying a sword and get tagged, the sword resets', '00FF00');
     world.chatManager.sendBroadcastMessage('5. Team with most points after 5 minutes wins!', '00FF00');

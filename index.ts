@@ -403,6 +403,16 @@ function startRound(world: World) {
     world.chatManager.sendBroadcastMessage(`Current Score - Red: ${gameData.redScore}, Blue: ${gameData.blueScore}`, 'FFFF00');
   }, 60000);
   
+  // Start golden sword spawn cycle
+  createGoldenSwordPowerup(world);
+  const powerupInterval = setInterval(() => {
+    if (!gameData.isRoundActive) {
+      clearInterval(powerupInterval);
+      return;
+    }
+    createGoldenSwordPowerup(world);
+  }, GOLDEN_SWORD_SPAWN_INTERVAL);
+  
   updateUiState(world);
 }
 
@@ -597,6 +607,23 @@ function cleanupGameState(world: World) {
 
   // Update UI for all connected players
   updateUiState(world);
+
+  // Remove any existing golden sword powerups
+  world.entityManager.getAllEntities().forEach(entity => {
+    if (entity.name === 'golden_sword_powerup') {
+      entity.despawn();
+    }
+  });
+
+  // Reset any active speed boosts
+  allPlayers.forEach(playerEntity => {
+    const controller = playerEntity.controller as MyEntityController;
+    if (controller) {
+      controller.runVelocity = 8; // Reset to default values
+      controller.walkVelocity = 4;
+      playerEntity.stopModelAnimations(['speed_boost_effect']);
+    }
+  });
 }
 
 // Modify endGame to use cleanup
@@ -688,6 +715,114 @@ function handlePlayerTag(world: World, taggedPlayer: PlayerEntity, tagger: Playe
 
     world.chatManager.sendBroadcastMessage(`${taggedPlayer.name} has respawned!`, '00FF00');
   }, RESPAWN_DELAY) as NodeJS.Timeout;
+}
+
+// Add after other constants
+const GOLDEN_SWORD_SPAWN_INTERVAL = 60000; // 1 minute in milliseconds
+const SPEED_BOOST_DURATION = 10000; // 10 seconds in milliseconds
+const SPEED_BOOST_MULTIPLIER = 1.25; // 25% speed increase
+const GOLDEN_SWORD_SPAWN_POSITION = { x: 1, y: 6, z: 0 }; // Center of map
+
+// Add this function after other entity creation functions
+function createGoldenSwordPowerup(world: World) {
+  // Remove any existing golden sword powerups
+  world.entityManager.getAllEntities().forEach(entity => {
+    if (entity.name === 'golden_sword_powerup') {
+      entity.despawn();
+    }
+  });
+
+  const goldenSword = new Entity({
+    name: 'golden_sword_powerup',
+    modelUri: 'models/items/sword-golden.gltf',
+    modelScale: 0.8,
+    rigidBodyOptions: {
+      type: RigidBodyType.KINEMATIC,
+      enabledRotations: { x: false, y: true, z: false },
+      colliders: [
+        // Add block collision collider
+        {
+          shape: ColliderShape.CAPSULE,
+          radius: 0.2,
+          halfHeight: 0.5,
+          collisionGroups: {
+            belongsTo: [CollisionGroup.ENTITY],
+            collidesWith: [CollisionGroup.BLOCK],
+          },
+        },
+        // Keep the player interaction sensor
+        {
+          shape: ColliderShape.CYLINDER,
+          radius: 1,
+          halfHeight: 0.5,
+          isSensor: true,
+          collisionGroups: {
+            belongsTo: [CollisionGroup.ENTITY_SENSOR],
+            collidesWith: [CollisionGroup.ENTITY],
+          },
+          onCollision: (other: Entity | BlockType, started: boolean) => {
+            if (started && other instanceof PlayerEntity) {
+              const controller = other.controller as MyEntityController;
+              if (!controller) return;
+
+              // Apply speed boost
+              const originalRunVelocity = controller.runVelocity;
+              const originalWalkVelocity = controller.walkVelocity;
+              
+              controller.runVelocity *= SPEED_BOOST_MULTIPLIER;
+              controller.walkVelocity *= SPEED_BOOST_MULTIPLIER;
+
+              // Play power-up sound
+              const powerupSound = new Audio({
+                uri: 'audio/glass-break-1.mp3',
+                volume: 0.5,
+                position: other.position,
+              });
+              powerupSound.play(world);
+
+              // Announce power-up
+              world.chatManager.sendBroadcastMessage(
+                `${other.name} got a speed boost power-up!`,
+                'FFD700' // Gold color
+              );
+
+              // Remove the power-up
+              goldenSword.despawn();
+
+              // Reset after duration
+              setTimeout(() => {
+                controller.runVelocity = originalRunVelocity;
+                controller.walkVelocity = originalWalkVelocity;
+                other.stopModelAnimations(['speed_boost_effect']);
+                
+                world.chatManager.sendBroadcastMessage(
+                  `${other.name}'s speed boost has worn off!`,
+                  'FFD700'
+                );
+              }, SPEED_BOOST_DURATION);
+            }
+          }
+        }
+      ]
+    }
+  });
+
+  // Spawn the sword and set its initial rotation to stand upright
+  goldenSword.spawn(world, GOLDEN_SWORD_SPAWN_POSITION);
+  goldenSword.setRotation(Quaternion.fromEuler(-90, 0, 0));
+  
+  // Add rotation animation
+  const floatInterval = setInterval(() => {
+    if (!goldenSword.isSpawned) {
+      clearInterval(floatInterval);
+      return;
+    }
+    
+    // Rotate the sword around Y axis while maintaining upright position
+    const currentRotation = goldenSword.rotation;
+    const newRotation = Quaternion.fromEuler(-90, (Date.now() / 1000) * 50 % 360, 0);
+    goldenSword.setRotation(newRotation);
+  }, 16);
 }
 
 startServer(world => {

@@ -18,7 +18,16 @@
     const teamListElement = document.getElementsByClassName(`${team}-team-list`)[0];
     teamListElement.innerHTML = '';
 
-    players.forEach(player => {
+    // Sort players - sword holders firsts
+    const sortedPlayers = [...players].sort((a, b) => {
+      const [, , hasSwordA] = a.split('|');
+      const [, , hasSwordB] = b.split('|');
+      if (hasSwordA === 'true' && hasSwordB !== 'true') return -1;
+      if (hasSwordA !== 'true' && hasSwordB === 'true') return 1;
+      return 0;
+    });
+
+    sortedPlayers.forEach(player => {
       const playerEntry = document.createElement('div');
       playerEntry.classList.add('player-entry');
       
@@ -36,6 +45,9 @@
         swordSpan.classList.add('sword-icon');
         swordSpan.innerText = ' ⚔️';
         nameSpan.appendChild(swordSpan);
+        
+        // Add highlight effect for sword holders
+        playerEntry.classList.add('sword-holder');
       }
       
       playerEntry.appendChild(nameSpan);
@@ -131,6 +143,11 @@
         staminaFill.classList.add('low');
       }
     }
+
+    // Handle minimap data
+    if (data.minimap) {
+      updateMinimap(data.minimap);
+    }
   });
 
   hytopia.registerSceneUITemplate('team-selection-ui', () => {
@@ -143,6 +160,59 @@
   hytopia.registerSceneUITemplate('player-ready', () => {
     return document.getElementById('player-ready').content.cloneNode(true);
   });
+
+  function updateMinimap(mapData) {
+    const minimap = document.querySelector('.minimap');
+    if (!minimap) return;
+
+    // Clear existing markers
+    minimap.innerHTML = '';
+
+    // Map bounds (from the game map)
+    const mapBounds = {
+      minX: -50,
+      maxX: 50,
+      minZ: -30,
+      maxZ: 30
+    };
+
+    // Helper function to convert world coordinates to minimap position
+    function worldToMinimap(x, z) {
+      const mapWidth = minimap.clientWidth;
+      const mapHeight = minimap.clientHeight;
+      
+      const percentX = (x - mapBounds.minX) / (mapBounds.maxX - mapBounds.minX);
+      const percentZ = (z - mapBounds.minZ) / (mapBounds.maxZ - mapBounds.minZ);
+      
+      return {
+        x: percentX * mapWidth,
+        y: percentZ * mapHeight
+      };
+    }
+
+    // Add players
+    mapData.players.forEach(player => {
+      const pos = worldToMinimap(player.x, player.z);
+      const marker = document.createElement('div');
+      marker.className = `map-marker ${player.team}-player`;
+      if (player.hasSword) {
+        marker.classList.add('sword-carrier');
+      }
+      marker.style.left = `${pos.x}px`;
+      marker.style.top = `${pos.y}px`;
+      minimap.appendChild(marker);
+    });
+
+    // Add powerups
+    mapData.powerups.forEach(powerup => {
+      const pos = worldToMinimap(powerup.x, powerup.z);
+      const marker = document.createElement('div');
+      marker.className = `map-marker ${powerup.type}`;
+      marker.style.left = `${pos.x}px`;
+      marker.style.top = `${pos.y}px`;
+      minimap.appendChild(marker);
+    });
+  }
 </script>
 
 <!-- Game UI -->
@@ -207,6 +277,13 @@
         <div class="blue-team-list"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Add this after the game-board div -->
+<div class="minimap-container">
+  <div class="minimap">
+    <!-- Players and items will be added here dynamically -->
   </div>
 </div>
 
@@ -280,6 +357,8 @@
   }
 
   .red-team-list, .blue-team-list {
+    display: flex;
+    flex-direction: column;
     max-height: 150px;
     overflow-y: auto;
   }
@@ -290,6 +369,7 @@
     margin: 5px 0;
     background: rgba(255,255,255,0.1);
     border-radius: 4px;
+    transition: all 0.3s ease;
   }
 
   .team-selection-box {
@@ -448,5 +528,97 @@
     color: #a855f7; /* Purple color */
     text-shadow: 0 0 5px rgba(168, 85, 247, 0.5); /* Subtle glow effect */
     font-weight: bold;
+  }
+
+  .sword-holder {
+    order: -1; /* Bring to top if using flexbox */
+    background: rgba(168, 85, 247, 0.2) !important; /* Purple background */
+    border-left: 3px solid #a855f7; /* Purple accent */
+    margin-bottom: 8px !important; /* Extra spacing */
+  }
+
+  .minimap-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 200px;
+    height: 200px;
+    background: rgba(0, 0, 0, 0.8);
+    border-radius: 8px;
+    padding: 10px;
+    z-index: 1000;
+  }
+
+  .minimap {
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    position: relative;
+    /* Add center line */
+    &::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: rgba(255, 255, 255, 0.3);
+    }
+  }
+
+  .map-marker {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: all 0.1s ease;
+  }
+
+  /* Add sword markers */
+  .map-marker.red_sword::after,
+  .map-marker.blue_sword::after {
+    content: '🚩';
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+  }
+
+  .map-marker.red-player {
+    background: #ef4444;
+  }
+
+  .map-marker.blue-player {
+    background: #60a5fa;
+  }
+
+  .map-marker.powerup {
+    background: #fbbf24;
+    width: 8px;
+    height: 8px;
+  }
+
+  .map-marker.sword-carrier::after {
+    content: '⚔️';
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+  }
+
+  .map-marker.potion {
+    background: #22c55e;
+    width: 8px;
+    height: 8px;
+  }
+
+  .map-marker.shield {
+    background: #f59e0b;
+    width: 8px;
+    height: 8px;
   }
 </style> 

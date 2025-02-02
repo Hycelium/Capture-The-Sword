@@ -42,7 +42,7 @@ const ROUND_DURATION = 300; // 5 minutes
 const RESPAWN_DELAY = 13000; // 13 seconds respawn delay
 const SCORE_ZONES = {
   red: 4,  // Red scores at x > 4
-  blue: -1 // Blue scores at x < -1
+  blue: -2 // Blue scores at x < -1
 };
 const MAP_CENTER_X = 0; // Middle of the map X coordinate
 const SCORE_CHECK_INTERVAL = 100; // How often to check for scoring (milliseconds)
@@ -75,7 +75,7 @@ let gameStartTime: number | null = null;
 // Sword spawn positions
 const SWORD_SPAWNS = {
   red: { x: 45, y: 7, z: -3 },
-  blue: { x: -43, y: 7, z: 6 },
+  blue: { x: -43, y: 7, z: 7 },
 };
 
 // Team selection positions
@@ -272,7 +272,7 @@ function spawnTeamSelectionNPCs(world: World) {
 }
 
 // Add after other constants
-const MAX_TEAM_SIZE = 1;
+const MAX_TEAM_SIZE = 5;
 const SPECTATOR_POSITION = { x: 2, y: 28, z: 1 };
 
 // Modify addPlayerToTeam function to handle team size limits
@@ -989,9 +989,9 @@ function resetAfterScore(world: World) {
   allPlayers.forEach(playerEntity => {
     const controller = playerEntity.controller as MyEntityController;
     if (controller?.team === 'red') {
-      playerEntity.setPosition({ x: 45, y: 7, z: 4 });
+      playerEntity.setPosition({ x: 47, y: 7, z: -1 });
     } else if (controller?.team === 'blue') {
-      playerEntity.setPosition({ x: -44, y: 7, z: -4 });
+      playerEntity.setPosition({ x: -45, y: 7, z: 5 });
     }
   });
 

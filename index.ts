@@ -41,31 +41,23 @@ const LOBBY_COUNTDOWN = 60; // 1 minute warmup
 const ROUND_DURATION = 300; // 5 minutes
 const RESPAWN_DELAY = 13000; // 13 seconds respawn delay
 const SCORE_ZONES = {
-  red: 3,  // Red scores at x > 3
-  blue: -3 // Blue scores at x < -3
+  red: 4,  // Red scores at x > 4
+  blue: -1 // Blue scores at x < -1
 };
 const MAP_CENTER_X = 0; // Middle of the map X coordinate
 const SCORE_CHECK_INTERVAL = 100; // How often to check for scoring (milliseconds)
 
-function createBackgroundMusic() {
-  return new Audio({
-    uri: 'audio/age-of-sword-5.mp3',
-    loop: true,
-    volume: 0.3,
-  });
-}
+const BACKGROUND_MUSIC = new Audio({
+  uri: 'audio/age-of-sword-5.mp3',
+  loop: true,
+  volume: 0.3, // Adjust volume as needed
+});
 
-function createVictoryFanfare() {
-  return new Audio({
-    uri: 'audio/trumpet.mp3',
-    volume: 0.5,
-    loop: false,
-  });
-}
-
-// Replace the constant declarations with let
-let BACKGROUND_MUSIC = createBackgroundMusic();
-let VICTORY_FANFARE = createVictoryFanfare();
+const VICTORY_FANFARE = new Audio({
+  uri: 'audio/trumpet.mp3',
+  volume: 0.5,
+  loop: false,
+});
 
 let scoreCheckInterval: NodeJS.Timer | undefined;
 let scoreAnnounceInterval: NodeJS.Timer | undefined;
@@ -279,10 +271,30 @@ function spawnTeamSelectionNPCs(world: World) {
   blueTeamUi.load(world);
 }
 
+// Add after other constants
+const MAX_TEAM_SIZE = 1;
+const SPECTATOR_POSITION = { x: 2, y: 28, z: 1 };
+
+// Modify addPlayerToTeam function to handle team size limits
 function addPlayerToTeam(world: World, playerEntity: PlayerEntity, team: 'red' | 'blue') {
   // Don't allow team changes during active round
   if (gameData.isRoundActive) {
     world.chatManager.sendBroadcastMessage("Cannot change teams during an active round!", 'FF0000');
+    return;
+  }
+
+  // Check team size limit
+  const targetTeam = team === 'red' ? RED_TEAM_PLAYERS : BLUE_TEAM_PLAYERS;
+  if (targetTeam.size >= MAX_TEAM_SIZE) {
+    // Only move to spectator if both teams have at least one player
+    if (RED_TEAM_PLAYERS.size >= 1 && BLUE_TEAM_PLAYERS.size >= 1) {
+      world.chatManager.sendBroadcastMessage(`${team} team is full! Maximum ${MAX_TEAM_SIZE} players per team.`, 'FF0000');
+      playerEntity.setPosition(SPECTATOR_POSITION);
+    } else {
+      // Otherwise, suggest joining the other team
+      const otherTeam = team === 'red' ? 'blue' : 'red';
+      world.chatManager.sendBroadcastMessage(`${team} team is full! Please join the ${otherTeam} team.`, 'FF0000');
+    }
     return;
   }
 
@@ -353,9 +365,156 @@ function updateUiState(world: World) {
   });
 }
 
+// Add after other constants
+const MAX_TEAM_DIFFERENCE = 1; // Maximum allowed difference in team sizes
+
+// Add this new function
+function balanceTeams(world: World) {
+  const redSize = RED_TEAM_PLAYERS.size;
+  const blueSize = BLUE_TEAM_PLAYERS.size;
+  const difference = Math.abs(redSize - blueSize);
+  
+  if (difference <= MAX_TEAM_DIFFERENCE) {
+    return; // Teams are balanced enough
+  }
+  
+  // Determine which team needs players moved
+  const sourceTeam = redSize > blueSize ? RED_TEAM_PLAYERS : BLUE_TEAM_PLAYERS;
+  const targetTeam = redSize > blueSize ? BLUE_TEAM_PLAYERS : RED_TEAM_PLAYERS;
+  const sourceTeamColor = redSize > blueSize ? 'red' : 'blue';
+  const targetTeamColor = redSize > blueSize ? 'blue' : 'red';
+  
+  // Calculate how many players need to be moved
+  const playersToMove = Math.floor(difference / 2);
+  
+  // Select random players to move
+  const players = Array.from(sourceTeam);
+  const selectedPlayers = new Set<PlayerEntity>();
+  
+  while (selectedPlayers.size < playersToMove && players.length > 0) {
+    const randomIndex = Math.floor(Math.random() * players.length);
+    const player = players[randomIndex];
+    selectedPlayers.add(player);
+    players.splice(randomIndex, 1);
+  }
+  
+  // Move the selected players
+  selectedPlayers.forEach(player => {
+    sourceTeam.delete(player);
+    targetTeam.add(player);
+    
+    const controller = player.controller as MyEntityController;
+    if (controller) {
+      controller.team = targetTeamColor as 'red' | 'blue';
+    }
+    
+    world.chatManager.sendBroadcastMessage(
+      `${player.name} was moved to ${targetTeamColor} team for balance!`,
+      targetTeamColor === 'red' ? 'FF0000' : '0000FF'
+    );
+  });
+  
+  updateUiState(world);
+}
+
+// Add this helper function to check if all players have teams
+function allPlayersHaveTeams(world: World): boolean {
+  const allPlayers = world.entityManager.getAllEntities()
+    .filter(e => e instanceof PlayerEntity) as PlayerEntity[];
+    
+  return allPlayers.every(player => {
+    const controller = player.controller as MyEntityController;
+    return controller?.team === 'red' || controller?.team === 'blue';
+  });
+}
+
+// Modify assignRemainingPlayers to handle team size limits
+function assignRemainingPlayers(world: World) {
+  const unassignedPlayers = world.entityManager.getAllEntities()
+    .filter(e => e instanceof PlayerEntity)
+    .filter(e => {
+      const controller = (e as PlayerEntity).controller as MyEntityController;
+      return !controller?.team;
+    }) as PlayerEntity[];
+
+  if (unassignedPlayers.length === 0) return;
+
+  unassignedPlayers.forEach(player => {
+    // Check if both teams are full
+    if (RED_TEAM_PLAYERS.size >= MAX_TEAM_SIZE && BLUE_TEAM_PLAYERS.size >= MAX_TEAM_SIZE) {
+      // Only move to spectator if both teams have at least one player
+      if (RED_TEAM_PLAYERS.size >= 1 && BLUE_TEAM_PLAYERS.size >= 1) {
+        world.chatManager.sendBroadcastMessage(
+          `${player.name} moved to spectator (teams full)`,
+          'FFFF00'
+        );
+        player.setPosition(SPECTATOR_POSITION);
+      } else {
+        // Try to add to the empty team if one exists
+        if (RED_TEAM_PLAYERS.size === 0) {
+          addPlayerToTeam(world, player, 'red');
+        } else if (BLUE_TEAM_PLAYERS.size === 0) {
+          addPlayerToTeam(world, player, 'blue');
+        }
+      }
+      return;
+    }
+
+    // Determine which team needs players
+    const redSize = RED_TEAM_PLAYERS.size;
+    const blueSize = BLUE_TEAM_PLAYERS.size;
+    
+    let assignedTeam: 'red' | 'blue';
+    if (redSize >= MAX_TEAM_SIZE) {
+      assignedTeam = 'blue';
+    } else if (blueSize >= MAX_TEAM_SIZE) {
+      assignedTeam = 'red';
+    } else if (redSize < blueSize) {
+      assignedTeam = 'red';
+    } else if (blueSize < redSize) {
+      assignedTeam = 'blue';
+    } else {
+      // Teams are even, assign randomly
+      assignedTeam = Math.random() < 0.5 ? 'red' : 'blue';
+    }
+
+    // Add to team
+    if (assignedTeam === 'red' && redSize < MAX_TEAM_SIZE) {
+      RED_TEAM_PLAYERS.add(player);
+    } else if (assignedTeam === 'blue' && blueSize < MAX_TEAM_SIZE) {
+      BLUE_TEAM_PLAYERS.add(player);
+    } else {
+      // If we get here, move to spectator
+      world.chatManager.sendBroadcastMessage(
+        `${player.name} moved to spectator (teams full)`,
+        'FFFF00'
+      );
+      player.setPosition(SPECTATOR_POSITION);
+      return;
+    }
+
+    // Update controller
+    const controller = player.controller as MyEntityController;
+    if (controller) {
+      controller.team = assignedTeam;
+    }
+
+    world.chatManager.sendBroadcastMessage(
+      `${player.name} was automatically assigned to ${assignedTeam} team!`,
+      assignedTeam === 'red' ? 'FF0000' : '0000FF'
+    );
+  });
+
+  updateUiState(world);
+}
+
+// Modify the startGame function's countdown completion
 function startGame(world: World) {
   lobbyState = 'starting';
   gameStartTime = Date.now();
+  
+  // Balance teams before starting countdown
+  balanceTeams(world);
   
   // Start countdown
   gameData.timeRemaining = LOBBY_COUNTDOWN;
@@ -363,6 +522,14 @@ function startGame(world: World) {
   // Update UI every second during countdown
   countdownInterval = setInterval(() => {
     gameData.timeRemaining--;
+    
+    // Check if we can reduce countdown
+    if (gameData.timeRemaining > 10 && allPlayersHaveTeams(world)) {
+      world.chatManager.sendBroadcastMessage('All players ready! Starting soon...', '00FF00');
+      gameData.timeRemaining = 10;
+      balanceTeams(world);
+    }
+    
     updateUiState(world);
     
     // Announce time remaining at specific intervals
@@ -370,10 +537,20 @@ function startGame(world: World) {
         gameData.timeRemaining === 30 || 
         gameData.timeRemaining === 60) {
       world.chatManager.sendBroadcastMessage(`Game starting in ${gameData.timeRemaining} seconds!`, '00FF00');
+      
+      // Do one final balance check at 10 seconds
+      if (gameData.timeRemaining === 10) {
+        balanceTeams(world);
+      }
     }
     
     if (gameData.timeRemaining <= 0) {
       clearInterval(countdownInterval);
+      // Assign any remaining unassigned players before starting
+      assignRemainingPlayers(world);
+      // Do one final balance check
+      balanceTeams(world);
+      // Start immediately
       startRound(world);
     }
   }, 1000);
@@ -602,6 +779,39 @@ function createDivineShield(world: World, position: { x: number, y: number, z: n
   }, 16);
 }
 
+// Add after other constants
+const MINIMAP_UPDATE_INTERVAL = 100; // Update minimap 10 times per second
+
+// Add this function after other functions
+function getMinimapData(world: World) {
+  const players = [...RED_TEAM_PLAYERS, ...BLUE_TEAM_PLAYERS].map(player => {
+    const controller = player.controller as MyEntityController;
+    return {
+      x: player.position.x,
+      z: player.position.z,
+      team: controller.team,
+      hasSword: !!controller.sword
+    };
+  });
+
+  const powerups = world.entityManager.getAllEntities()
+    .filter(entity => ['golden_sword_powerup', 'water_potion', 'divine_shield', 'red_sword', 'blue_sword']
+      .includes(entity.name || ''))
+    .map(entity => ({
+      x: entity.position.x,
+      z: entity.position.z,
+      type: entity.name === 'golden_sword_powerup' ? 'powerup' :
+            entity.name === 'water_potion' ? 'potion' :
+            entity.name === 'divine_shield' ? 'shield' :
+            entity.name || 'powerup'
+    }));
+
+  return {
+    players,
+    powerups
+  };
+}
+
 function startRound(world: World) {
   lobbyState = 'inProgress';
   gameData.isRoundActive = true;
@@ -661,6 +871,23 @@ function startRound(world: World) {
     }
     APPLE_SPAWN_POSITIONS.forEach(position => createDivineShield(world, position));
   }, APPLE_SPAWN_INTERVAL);
+  
+  // Add minimap updates
+  const minimapInterval = setInterval(() => {
+    if (!gameData.isRoundActive) {
+      clearInterval(minimapInterval);
+      return;
+    }
+    
+    // Get and broadcast minimap data to all players
+    const minimapData = getMinimapData(world);
+    const players = [...RED_TEAM_PLAYERS, ...BLUE_TEAM_PLAYERS];
+    players.forEach(player => {
+      player.player.ui.sendData({
+        minimap: minimapData
+      });
+    });
+  }, MINIMAP_UPDATE_INTERVAL);
   
   updateUiState(world);
 }
@@ -779,11 +1006,8 @@ function resetAfterScore(world: World) {
 
 // Add cleanup function
 function cleanupGameState(world: World) {
-  // Stop and recreate audio objects
+  // Stop background music
   BACKGROUND_MUSIC.pause();
-  VICTORY_FANFARE.pause();
-  BACKGROUND_MUSIC = createBackgroundMusic();
-  VICTORY_FANFARE = createVictoryFanfare();
 
   // Clear all intervals
   [scoreCheckInterval, scoreAnnounceInterval, countdownInterval].forEach(interval => {
@@ -911,6 +1135,15 @@ function cleanupGameState(world: World) {
       controller._shieldImmunityEndTime = undefined;
     }
   });
+
+  // Clear minimap for all players
+  world.entityManager.getAllEntities()
+    .filter(e => e instanceof PlayerEntity)
+    .forEach(player => {
+      (player as PlayerEntity).player.ui.sendData({
+        minimap: { players: [], powerups: [] }
+      });
+    });
 }
 
 // Modify endGame to use cleanup
@@ -924,7 +1157,7 @@ function endGame(world: World) {
   const winner = gameData.redScore > gameData.blueScore ? 'red' : 
                 gameData.blueScore > gameData.redScore ? 'blue' : 'tie';
   
-  // Play victory fanfare with new instance
+  // Play victory fanfare
   VICTORY_FANFARE.play(world);
   
   // Announce results

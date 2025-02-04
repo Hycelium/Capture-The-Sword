@@ -39,7 +39,7 @@ const gameData: GameState = {
 // Constants
 const LOBBY_COUNTDOWN = 60; // 1 minute warmup
 const ROUND_DURATION = 300; // 5 minutes
-const RESPAWN_DELAY = 13000; // 13 seconds respawn delay
+const RESPAWN_DELAY = 10000; // 10 seconds respawn delay
 const SCORE_ZONES = {
   red: 4,  // Red scores at x > 4
   blue: -2 // Blue scores at x < -1
@@ -302,21 +302,85 @@ function addPlayerToTeam(world: World, playerEntity: PlayerEntity, team: 'red' |
   RED_TEAM_PLAYERS.delete(playerEntity);
   BLUE_TEAM_PLAYERS.delete(playerEntity);
 
+  // Store the player's camera and state before despawning
+  const playerCamera = playerEntity.player.camera;
+  const oldPlayerState = PLAYER_STATES.get(playerEntity);
+  
+  // Update the player model based on team
+  const modelUri = team === 'red' ? 'models/red-player.gltf' : 'models/blue-player.gltf';
+  
+  // Create new player entity with team-specific model
+  const newPlayerEntity = new PlayerEntity({
+    player: playerEntity.player,
+    name: playerEntity.name,
+    modelUri: modelUri,
+    modelLoopedAnimations: ['idle'],
+    modelScale: 0.5,
+    controller: new MyEntityController({
+      team: team
+    }),
+  });
+
+  // Get exact position and rotation for perfect overlap
+  const oldPosition = playerEntity.position;
+  const oldRotation = playerEntity.rotation;
+  const oldVelocity = playerEntity.linearVelocity;
+
+  // Transfer collision handlers from old entity
+  newPlayerEntity.onBlockCollision = playerEntity.onBlockCollision;
+  newPlayerEntity.onEntityCollision = playerEntity.onEntityCollision;
+
+  // Spawn new entity first to ensure smooth transition
+  newPlayerEntity.spawn(world, oldPosition, oldRotation);
+  
+  // Set the same velocity as the old entity
+  newPlayerEntity.setLinearVelocity(oldVelocity);
+
+  // Transfer player state to new entity
+  if (oldPlayerState) {
+    PLAYER_STATES.set(newPlayerEntity, oldPlayerState);
+    PLAYER_STATES.delete(playerEntity);
+  }
+
+  // Transfer divine shield if it exists
+  const oldController = playerEntity.controller as MyEntityController;
+  const newController = newPlayerEntity.controller as MyEntityController;
+  if (oldController?.divineShield) {
+    // Update parent reference for divine shield
+    oldController.divineShield.parent = newPlayerEntity;
+    oldController.divineShield.parentNodeName = 'head';
+    newController.divineShield = oldController.divineShield;
+    oldController.divineShield = undefined;
+  }
+
+  // Transfer shield immunity timer if active
+  if (oldController?._shieldImmunityEndTime) {
+    newController._shieldImmunityEndTime = oldController._shieldImmunityEndTime;
+  }
+
+  // Switch camera to new entity before despawning old one
+  playerCamera.setAttachedToEntity(newPlayerEntity);
+  
+  // Now safe to despawn old entity
+  playerEntity.despawn();
+
   // Add to selected team
   if (team === 'red') {
-    RED_TEAM_PLAYERS.add(playerEntity);
+    RED_TEAM_PLAYERS.add(newPlayerEntity);
   } else {
-    BLUE_TEAM_PLAYERS.add(playerEntity);
+    BLUE_TEAM_PLAYERS.add(newPlayerEntity);
   }
 
   // Update controller team
-  const controller = playerEntity.controller as MyEntityController;
-  if (controller) {
-    controller.team = team;
+  if (newController) {
+    newController.team = team;
   }
 
   // Update UI with both random name and username
-  world.chatManager.sendBroadcastMessage(`${playerEntity.name} (${playerEntity.player.username}) joined ${team} team!`, team === 'red' ? 'FF0000' : '0000FF');
+  world.chatManager.sendBroadcastMessage(
+    `${newPlayerEntity.name} (${newPlayerEntity.player.username}) joined ${team} team!`, 
+    team === 'red' ? 'FF0000' : '0000FF'
+  );
   
   updateUiState(world);
 
@@ -400,13 +464,8 @@ function balanceTeams(world: World) {
   
   // Move the selected players
   selectedPlayers.forEach(player => {
-    sourceTeam.delete(player);
-    targetTeam.add(player);
-    
-    const controller = player.controller as MyEntityController;
-    if (controller) {
-      controller.team = targetTeamColor as 'red' | 'blue';
-    }
+    // Instead of directly moving players, use addPlayerToTeam to handle model switching
+    addPlayerToTeam(world, player, targetTeamColor as 'red' | 'blue');
     
     world.chatManager.sendBroadcastMessage(
       `${player.name} was moved to ${targetTeamColor} team for balance!`,
@@ -1408,13 +1467,13 @@ startServer(world => {
     // Load UI
     player.ui.load('ui/index.html');
     
-    // Create player entity with random name
+    // Create player entity with default model (will be updated when they join a team)
     const randomName = getRandomPlayerName();
     const playerEntity = new PlayerEntity({
       player,
       name: randomName,
-      modelUri: 'models/players/player.gltf',
-      modelLoopedAnimations: [ 'idle' ],
+      modelUri: 'models/players/player.gltf', // Default model until team is chosen
+      modelLoopedAnimations: ['idle'],
       modelScale: 0.5,
       controller: new MyEntityController(),
     });

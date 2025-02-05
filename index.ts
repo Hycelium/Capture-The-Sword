@@ -275,8 +275,19 @@ function spawnTeamSelectionNPCs(world: World) {
 const MAX_TEAM_SIZE = 5;
 const SPECTATOR_POSITION = { x: 2, y: 28, z: 1 };
 
+// Add after other constants
+const SPECTATOR_STATES = new Set<PlayerEntity>();
+
 // Modify addPlayerToTeam function to handle team size limits
 function addPlayerToTeam(world: World, playerEntity: PlayerEntity, team: 'red' | 'blue') {
+  // Get current controller to check existing team
+  const currentController = playerEntity.controller as MyEntityController;
+  
+  // Only prevent joining same team during active game
+  if (currentController?.team === team && gameData.isRoundActive) {
+    return; // Silently return to avoid spam messages
+  }
+
   // Don't allow team changes during active round
   if (gameData.isRoundActive) {
     world.chatManager.sendBroadcastMessage("Cannot change teams during an active round!", 'FF0000');
@@ -405,25 +416,29 @@ function updateUiState(world: World) {
     teams: {
       red: Array.from(RED_TEAM_PLAYERS).map(p => {
         const controller = p.controller as MyEntityController;
-        return `${p.name}|${p.player.username}|${!!controller?.sword}`; // Add sword status
+        return `${p.name}|${p.player.username}|${!!controller?.sword}`;
       }),
       blue: Array.from(BLUE_TEAM_PLAYERS).map(p => {
         const controller = p.controller as MyEntityController;
-        return `${p.name}|${p.player.username}|${!!controller?.sword}`; // Add sword status
+        return `${p.name}|${p.player.username}|${!!controller?.sword}`;
       }),
     },
   };
 
-  // Send UI update to all players with their individual stamina values
-  const players = Array.from(RED_TEAM_PLAYERS).concat(Array.from(BLUE_TEAM_PLAYERS));
-  players.forEach(entity => {
+  // Send UI update to all players including spectators
+  const allPlayers = Array.from(RED_TEAM_PLAYERS)
+    .concat(Array.from(BLUE_TEAM_PLAYERS))
+    .concat(Array.from(SPECTATOR_STATES));
+
+  allPlayers.forEach(entity => {
     const controller = entity.controller as MyEntityController;
     const playerUiState = {
       ...uiState,
       stamina: {
         current: controller.currentStamina,
         max: controller.maxStamina
-      }
+      },
+      isSpectator: SPECTATOR_STATES.has(entity)
     };
     entity.player.ui.sendData(playerUiState);
   });
@@ -444,8 +459,6 @@ function balanceTeams(world: World) {
   
   // Determine which team needs players moved
   const sourceTeam = redSize > blueSize ? RED_TEAM_PLAYERS : BLUE_TEAM_PLAYERS;
-  const targetTeam = redSize > blueSize ? BLUE_TEAM_PLAYERS : RED_TEAM_PLAYERS;
-  const sourceTeamColor = redSize > blueSize ? 'red' : 'blue';
   const targetTeamColor = redSize > blueSize ? 'blue' : 'red';
   
   // Calculate how many players need to be moved
@@ -462,11 +475,9 @@ function balanceTeams(world: World) {
     players.splice(randomIndex, 1);
   }
   
-  // Move the selected players
+  // Move the selected players using addPlayerToTeam
   selectedPlayers.forEach(player => {
-    // Instead of directly moving players, use addPlayerToTeam to handle model switching
     addPlayerToTeam(world, player, targetTeamColor as 'red' | 'blue');
-    
     world.chatManager.sendBroadcastMessage(
       `${player.name} was moved to ${targetTeamColor} team for balance!`,
       targetTeamColor === 'red' ? 'FF0000' : '0000FF'
@@ -487,7 +498,7 @@ function allPlayersHaveTeams(world: World): boolean {
   });
 }
 
-// Modify assignRemainingPlayers to handle team size limits
+// Modify assignRemainingPlayers to use addPlayerToTeam instead of direct assignment
 function assignRemainingPlayers(world: World) {
   const unassignedPlayers = world.entityManager.getAllEntities()
     .filter(e => e instanceof PlayerEntity)
@@ -501,13 +512,14 @@ function assignRemainingPlayers(world: World) {
   unassignedPlayers.forEach(player => {
     // Check if both teams are full
     if (RED_TEAM_PLAYERS.size >= MAX_TEAM_SIZE && BLUE_TEAM_PLAYERS.size >= MAX_TEAM_SIZE) {
-      // Only move to spectator if both teams have at least one player
+      // Move to spectator if both teams have players
       if (RED_TEAM_PLAYERS.size >= 1 && BLUE_TEAM_PLAYERS.size >= 1) {
         world.chatManager.sendBroadcastMessage(
           `${player.name} moved to spectator (teams full)`,
           'FFFF00'
         );
         player.setPosition(SPECTATOR_POSITION);
+        SPECTATOR_STATES.add(player);
       } else {
         // Try to add to the empty team if one exists
         if (RED_TEAM_PLAYERS.size === 0) {
@@ -537,31 +549,8 @@ function assignRemainingPlayers(world: World) {
       assignedTeam = Math.random() < 0.5 ? 'red' : 'blue';
     }
 
-    // Add to team
-    if (assignedTeam === 'red' && redSize < MAX_TEAM_SIZE) {
-      RED_TEAM_PLAYERS.add(player);
-    } else if (assignedTeam === 'blue' && blueSize < MAX_TEAM_SIZE) {
-      BLUE_TEAM_PLAYERS.add(player);
-    } else {
-      // If we get here, move to spectator
-      world.chatManager.sendBroadcastMessage(
-        `${player.name} moved to spectator (teams full)`,
-        'FFFF00'
-      );
-      player.setPosition(SPECTATOR_POSITION);
-      return;
-    }
-
-    // Update controller
-    const controller = player.controller as MyEntityController;
-    if (controller) {
-      controller.team = assignedTeam;
-    }
-
-    world.chatManager.sendBroadcastMessage(
-      `${player.name} was automatically assigned to ${assignedTeam} team!`,
-      assignedTeam === 'red' ? 'FF0000' : '0000FF'
-    );
+    // Use addPlayerToTeam instead of direct assignment to ensure proper model
+    addPlayerToTeam(world, player, assignedTeam);
   });
 
   updateUiState(world);
@@ -621,7 +610,7 @@ function startGame(world: World) {
 const POTION_SPAWN_POSITIONS = [
   { x: 31, y: 7, z: -21 },  // Red side wooden structure
   { x: 35, y: 7, z: 18 },   // Red side brick structure
-  { x: -29, y: 7, z: -17 }, // Blue side brick structure
+  { x: -33, y: 7, z: -16 }, // Blue side brick structure
   { x: -28, y: 7, z: 23 },  // Blue side wood structure
 ];
 
@@ -688,14 +677,6 @@ function createWaterPotion(world: World, position: { x: number, y: number, z: nu
 
               // Remove the pickup-able potion
               potion.despawn();
-
-              // Play pickup sound
-              const pickupSound = new Audio({
-                uri: 'audio/glass-break-1.mp3',
-                volume: 0.5,
-                position: other.position,
-              });
-              pickupSound.play(world);
 
               world.chatManager.sendBroadcastMessage(
                 `${other.name} picked up a water potion! Press E to use it.`,
@@ -801,14 +782,6 @@ function createDivineShield(world: World, position: { x: number, y: number, z: n
 
               // Remove the pickup-able apple
               apple.despawn();
-
-              // Play pickup sound
-              const pickupSound = new Audio({
-                uri: 'audio/glass-break-1.mp3',
-                volume: 0.5,
-                position: other.position,
-              });
-              pickupSound.play(world);
 
               world.chatManager.sendBroadcastMessage(
                 `${other.name} is protected by a divine shield!`,
@@ -1227,11 +1200,23 @@ function endGame(world: World) {
   }
   world.chatManager.sendBroadcastMessage(`Final Scores - Red: ${gameData.redScore}, Blue: ${gameData.blueScore}`, 'FFFF00');
   
+  // Move spectators back to spawn
+  SPECTATOR_STATES.forEach(spectator => {
+    if (spectator.isSpawned) {
+      spectator.setPosition({ x: 0, y: 10, z: 0 });
+      world.chatManager.sendBroadcastMessage(
+        `${spectator.name} can now join a team!`,
+        '00FF00'
+      );
+    }
+  });
+  SPECTATOR_STATES.clear();
+
   // Reset game state after delay
   setTimeout(() => {
     cleanupGameState(world);
     world.chatManager.sendBroadcastMessage('Game reset! Join a team to start a new game!', '00FF00');
-  }, 10000); // 10 second delay
+  }, 10000);
 }
 
 // Update tag handling function
@@ -1312,7 +1297,7 @@ function handlePlayerTag(world: World, taggedPlayer: PlayerEntity, tagger: Playe
 
     // Return tagged player to their base
     const spawnPos = controller.team === 'red' 
-      ? { x: 45, y: 7, z: 4 } 
+      ? { x: 46, y: 7, z: 8 } 
       : { x: -44, y: 7, z: -4 };
     taggedPlayer.setPosition(spawnPos);
 
@@ -1323,8 +1308,15 @@ function handlePlayerTag(world: World, taggedPlayer: PlayerEntity, tagger: Playe
 // Add after other constants
 const GOLDEN_SWORD_SPAWN_INTERVAL = 60000; // 1 minute in milliseconds
 const SPEED_BOOST_DURATION = 10000; // 10 seconds in milliseconds
-const SPEED_BOOST_MULTIPLIER = 1.25; // 25% speed increase
+const SPEED_BOOST_MULTIPLIER = 1.33; // 33% speed increase
 const GOLDEN_SWORD_SPAWN_POSITION = { x: 1, y: 6, z: 0 }; // Center of map
+
+// Add at the top with other constants
+const JUGGERNAUT_SOUND = new Audio({
+  uri: 'audio/thunder-strike-1.mp3',
+  volume: 0.8,
+  referenceDistance: 50, // Make it heard across the map
+});
 
 // Add this function after other entity creation functions
 function createGoldenSwordPowerup(world: World) {
@@ -1375,13 +1367,17 @@ function createGoldenSwordPowerup(world: World) {
               controller.runVelocity *= SPEED_BOOST_MULTIPLIER;
               controller.walkVelocity *= SPEED_BOOST_MULTIPLIER;
 
-              // Play power-up sound
-              const powerupSound = new Audio({
-                uri: 'audio/glass-break-1.mp3',
-                volume: 0.5,
-                position: other.position,
-              });
-              powerupSound.play(world);
+              // Check for Juggernaut Easter Egg (has all powerups)
+              if (controller.potion && controller.divineShield) {
+                // Play thunder sound
+                JUGGERNAUT_SOUND.play(world, true, other.position);
+                
+                // Announce the Easter Egg
+                world.chatManager.sendBroadcastMessage(
+                  `⚡ ${other.name} HAS BECOME THE JUGGERNAUT! ⚡`,
+                  'FF00FF' // Bright purple
+                );
+              }
 
               // Announce power-up
               world.chatManager.sendBroadcastMessage(
@@ -1429,7 +1425,7 @@ function createGoldenSwordPowerup(world: World) {
 }
 
 // Add after other constants
-const POTION_SPAWN_INTERVAL = 45000; // 45 seconds
+const POTION_SPAWN_INTERVAL = 60000; // 60 seconds
 
 startServer(world => {
   // Uncomment this to visualize physics vertices, will cause noticable lag.
@@ -1467,16 +1463,28 @@ startServer(world => {
     // Load UI
     player.ui.load('ui/index.html');
     
-    // Create player entity with default model (will be updated when they join a team)
+    // Create player entity with default model
     const randomName = getRandomPlayerName();
     const playerEntity = new PlayerEntity({
       player,
       name: randomName,
-      modelUri: 'models/players/player.gltf', // Default model until team is chosen
+      modelUri: 'models/players/player.gltf',
       modelLoopedAnimations: ['idle'],
       modelScale: 0.5,
       controller: new MyEntityController(),
     });
+
+    // If game is active, move to spectator position
+    if (gameData.isRoundActive) {
+      playerEntity.spawn(world, SPECTATOR_POSITION);
+      SPECTATOR_STATES.add(playerEntity);
+      world.chatManager.sendBroadcastMessage(
+        `${playerEntity.name} is now spectating! Join a team when the round ends.`,
+        'FFFF00'
+      );
+    } else {
+      playerEntity.spawn(world, { x: 0, y: 10, z: 0 });
+    }
 
     // Add collision handler for scoring
     playerEntity.onBlockCollision = (entity: Entity, blockType: BlockType, started: boolean) => {
@@ -1562,9 +1570,11 @@ startServer(world => {
     world.chatManager.sendBroadcastMessage('Game Rules:', '00FF00');
     world.chatManager.sendBroadcastMessage('1. Join a team by approaching the team captains', '00FF00');
     world.chatManager.sendBroadcastMessage('2. Steal the enemy team\'s sword and bring it to your side', '00FF00');
-    world.chatManager.sendBroadcastMessage('3. Tag enemy players to freeze them for 8 seconds', '00FF00');
-    world.chatManager.sendBroadcastMessage('4. If you\'re carrying a sword and get tagged, the sword resets', '00FF00');
+    world.chatManager.sendBroadcastMessage('3. Tag enemy players to freeze them for 10 seconds', '00FF00');
+    world.chatManager.sendBroadcastMessage('4. Tagging a sword holder/scoring will reset all players', '00FF00');
     world.chatManager.sendBroadcastMessage('5. Team with most points after 5 minutes wins!', '00FF00');
+    world.chatManager.sendBroadcastMessage('6. ALLOW YOUR PLAYER TO REST BEFORE THE GAME STARTS!!!', '00FF00');
+
   };
 
   world.onPlayerLeave = player => {

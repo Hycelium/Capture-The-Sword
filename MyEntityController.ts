@@ -17,7 +17,7 @@ import type { BlockType } from './server';
 
 // Add at the top with other constants
 const STAMINA_RESTORE_AMOUNT = 200; // 80% stamina restore
-const SHIELD_IMMUNITY_DURATION = 2000; // 2 seconds immunity after shield breaks
+const SHIELD_IMMUNITY_DURATION = 500; // 0.5 seconds immunity after shield breaks
 
 /** Options for creating a MyEntityController instance. @public */
 export interface MyEntityControllerOptions {
@@ -114,9 +114,6 @@ export default class MyEntityController extends BaseEntityController {
   private _stepAudio: Audio | undefined;
 
   /** @internal */
-  private _swordAudio: Audio | undefined;
-
-  /** @internal */
   private _groundContactCount: number = 0;
 
   /** @internal */
@@ -126,13 +123,7 @@ export default class MyEntityController extends BaseEntityController {
   private _sword?: Entity;
 
   /** @internal */
-  private _isAttacking: boolean = false;
-
-  /** @internal */
-  private _attackCooldown: number = 0;
-
-  /** The cooldown time between attacks in milliseconds */
-  public attackCooldownTime: number = 500;
+  private _shieldImmunityEndTime?: number;
 
   /** The team this controller belongs to */
   private _team?: 'red' | 'blue';
@@ -149,7 +140,7 @@ export default class MyEntityController extends BaseEntityController {
 
   /** @internal */
   private _potion?: Entity;
-  
+
   public get potion(): Entity | undefined {
     return this._potion;
   }
@@ -160,7 +151,7 @@ export default class MyEntityController extends BaseEntityController {
 
   /** @internal */
   private _divineShield?: Entity;
-  
+
   public get divineShield(): Entity | undefined {
     return this._divineShield;
   }
@@ -168,9 +159,6 @@ export default class MyEntityController extends BaseEntityController {
   public set divineShield(value: Entity | undefined) {
     this._divineShield = value;
   }
-
-  /** Add after other properties */
-  private _shieldImmunityEndTime?: number;
 
   public get hasShieldImmunity(): boolean {
     return this._shieldImmunityEndTime !== undefined && 
@@ -217,16 +205,6 @@ export default class MyEntityController extends BaseEntityController {
   /** Set the equipped sword */
   public set sword(value: Entity | undefined) {
     this._sword = value;
-    
-    // Create sword audio when sword is equipped
-    if (value && !this._swordAudio) {
-      this._swordAudio = new Audio({
-        uri: 'audio/sfx/sword/swing.mp3',
-        loop: false,
-        volume: 0.3,
-        attachedToEntity: value,
-      });
-    }
   }
 
   /**
@@ -318,21 +296,11 @@ export default class MyEntityController extends BaseEntityController {
 
     super.tickWithPlayerInput(entity, input, cameraOrientation, deltaTimeMs);
 
-    const { w, a, s, d, sp, sh, ml, e } = input;
+    const { w, a, s, d, sp, sh, e } = input;
     const { yaw } = cameraOrientation;
     const currentVelocity = entity.linearVelocity;
     const targetVelocities = { x: 0, y: 0, z: 0 };
     
-    // Update attack cooldown
-    if (this._attackCooldown > 0) {
-      this._attackCooldown = Math.max(0, this._attackCooldown - deltaTimeMs);
-    }
-    
-    // Handle sword attack with mouse left button
-    if (ml && this._sword && !this._isAttacking && this._attackCooldown === 0) {
-      this.attack(entity);
-    }
-
     // Handle potion use with E key
     if (e && this._potion && this._potion.isSpawned) {
       // Restore stamina
@@ -472,28 +440,6 @@ export default class MyEntityController extends BaseEntityController {
         z: 0,
         w: Math.fround(Math.cos(halfYaw)),
       });
-    }
-  }
-
-  /** Method to handle sword attack */
-  public attack(entity: PlayerEntity) {
-    if (this._sword && !this._isAttacking) {
-      this._isAttacking = true;
-      this._attackCooldown = this.attackCooldownTime;
-
-      // Play sword swing sound
-      if (this._swordAudio && entity.world) {
-        this._swordAudio.play(entity.world, true);
-      }
-
-      // Play attack animations
-      entity.startModelOneshotAnimations(['attack_upper']);
-      this._sword.startModelOneshotAnimations(['swing']);
-
-      // Reset attack state after animation
-      setTimeout(() => {
-        this._isAttacking = false;
-      }, 300); // Animation duration
     }
   }
 

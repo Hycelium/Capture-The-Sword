@@ -148,14 +148,6 @@
     if (data.minimap) {
       updateMinimap(data.minimap);
     }
-
-    // Handle spectator state
-    if (data.isSpectator !== undefined) {
-      const spectatorIndicator = document.querySelector('.spectator-indicator');
-      if (spectatorIndicator) {
-        spectatorIndicator.style.display = data.isSpectator ? 'block' : 'none';
-      }
-    }
   });
 
   hytopia.registerSceneUITemplate('team-selection-ui', () => {
@@ -293,11 +285,6 @@
   <div class="minimap">
     <!-- Players and items will be added here dynamically -->
   </div>
-</div>
-
-<!-- Add this to the game-board div -->
-<div class="spectator-indicator" style="display: none;">
-  SPECTATING
 </div>
 
 <!-- Styles -->
@@ -633,15 +620,5 @@
     background: #f59e0b;
     width: 8px;
     height: 8px;
-  }
-
-  .spectator-indicator {
-    color: #fbbf24;
-    font-weight: bold;
-    text-align: center;
-    padding: 5px;
-    margin-top: 10px;
-    background: rgba(251, 191, 36, 0.2);
-    border-radius: 4px;
   }
 </style> 

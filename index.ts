@@ -275,16 +275,13 @@ function spawnTeamSelectionNPCs(world: World) {
 const MAX_TEAM_SIZE = 5;
 const SPECTATOR_POSITION = { x: 2, y: 28, z: 1 };
 
-// Add after other constants
-const SPECTATOR_STATES = new Set<PlayerEntity>();
-
 // Modify addPlayerToTeam function to handle team size limits
 function addPlayerToTeam(world: World, playerEntity: PlayerEntity, team: 'red' | 'blue') {
   // Get current controller to check existing team
   const currentController = playerEntity.controller as MyEntityController;
   
-  // Only prevent joining same team during active game
-  if (currentController?.team === team && gameData.isRoundActive) {
+  // Don't allow joining the same team again
+  if (currentController?.team === team) {
     return; // Silently return to avoid spam messages
   }
 
@@ -416,29 +413,25 @@ function updateUiState(world: World) {
     teams: {
       red: Array.from(RED_TEAM_PLAYERS).map(p => {
         const controller = p.controller as MyEntityController;
-        return `${p.name}|${p.player.username}|${!!controller?.sword}`;
+        return `${p.name}|${p.player.username}|${!!controller?.sword}`; // Add sword status
       }),
       blue: Array.from(BLUE_TEAM_PLAYERS).map(p => {
         const controller = p.controller as MyEntityController;
-        return `${p.name}|${p.player.username}|${!!controller?.sword}`;
+        return `${p.name}|${p.player.username}|${!!controller?.sword}`; // Add sword status
       }),
     },
   };
 
-  // Send UI update to all players including spectators
-  const allPlayers = Array.from(RED_TEAM_PLAYERS)
-    .concat(Array.from(BLUE_TEAM_PLAYERS))
-    .concat(Array.from(SPECTATOR_STATES));
-
-  allPlayers.forEach(entity => {
+  // Send UI update to all players with their individual stamina values
+  const players = Array.from(RED_TEAM_PLAYERS).concat(Array.from(BLUE_TEAM_PLAYERS));
+  players.forEach(entity => {
     const controller = entity.controller as MyEntityController;
     const playerUiState = {
       ...uiState,
       stamina: {
         current: controller.currentStamina,
         max: controller.maxStamina
-      },
-      isSpectator: SPECTATOR_STATES.has(entity)
+      }
     };
     entity.player.ui.sendData(playerUiState);
   });
@@ -459,6 +452,8 @@ function balanceTeams(world: World) {
   
   // Determine which team needs players moved
   const sourceTeam = redSize > blueSize ? RED_TEAM_PLAYERS : BLUE_TEAM_PLAYERS;
+  const targetTeam = redSize > blueSize ? BLUE_TEAM_PLAYERS : RED_TEAM_PLAYERS;
+  const sourceTeamColor = redSize > blueSize ? 'red' : 'blue';
   const targetTeamColor = redSize > blueSize ? 'blue' : 'red';
   
   // Calculate how many players need to be moved
@@ -475,9 +470,11 @@ function balanceTeams(world: World) {
     players.splice(randomIndex, 1);
   }
   
-  // Move the selected players using addPlayerToTeam
+  // Move the selected players
   selectedPlayers.forEach(player => {
+    // Instead of directly moving players, use addPlayerToTeam to handle model switching
     addPlayerToTeam(world, player, targetTeamColor as 'red' | 'blue');
+    
     world.chatManager.sendBroadcastMessage(
       `${player.name} was moved to ${targetTeamColor} team for balance!`,
       targetTeamColor === 'red' ? 'FF0000' : '0000FF'
@@ -498,7 +495,7 @@ function allPlayersHaveTeams(world: World): boolean {
   });
 }
 
-// Modify assignRemainingPlayers to use addPlayerToTeam instead of direct assignment
+// Modify assignRemainingPlayers to handle team size limits
 function assignRemainingPlayers(world: World) {
   const unassignedPlayers = world.entityManager.getAllEntities()
     .filter(e => e instanceof PlayerEntity)
@@ -512,14 +509,13 @@ function assignRemainingPlayers(world: World) {
   unassignedPlayers.forEach(player => {
     // Check if both teams are full
     if (RED_TEAM_PLAYERS.size >= MAX_TEAM_SIZE && BLUE_TEAM_PLAYERS.size >= MAX_TEAM_SIZE) {
-      // Move to spectator if both teams have players
+      // Only move to spectator if both teams have at least one player
       if (RED_TEAM_PLAYERS.size >= 1 && BLUE_TEAM_PLAYERS.size >= 1) {
         world.chatManager.sendBroadcastMessage(
           `${player.name} moved to spectator (teams full)`,
           'FFFF00'
         );
         player.setPosition(SPECTATOR_POSITION);
-        SPECTATOR_STATES.add(player);
       } else {
         // Try to add to the empty team if one exists
         if (RED_TEAM_PLAYERS.size === 0) {
@@ -549,8 +545,31 @@ function assignRemainingPlayers(world: World) {
       assignedTeam = Math.random() < 0.5 ? 'red' : 'blue';
     }
 
-    // Use addPlayerToTeam instead of direct assignment to ensure proper model
-    addPlayerToTeam(world, player, assignedTeam);
+    // Add to team
+    if (assignedTeam === 'red' && redSize < MAX_TEAM_SIZE) {
+      RED_TEAM_PLAYERS.add(player);
+    } else if (assignedTeam === 'blue' && blueSize < MAX_TEAM_SIZE) {
+      BLUE_TEAM_PLAYERS.add(player);
+    } else {
+      // If we get here, move to spectator
+      world.chatManager.sendBroadcastMessage(
+        `${player.name} moved to spectator (teams full)`,
+        'FFFF00'
+      );
+      player.setPosition(SPECTATOR_POSITION);
+      return;
+    }
+
+    // Update controller
+    const controller = player.controller as MyEntityController;
+    if (controller) {
+      controller.team = assignedTeam;
+    }
+
+    world.chatManager.sendBroadcastMessage(
+      `${player.name} was automatically assigned to ${assignedTeam} team!`,
+      assignedTeam === 'red' ? 'FF0000' : '0000FF'
+    );
   });
 
   updateUiState(world);
@@ -657,6 +676,15 @@ function createWaterPotion(world: World, position: { x: number, y: number, z: nu
               const controller = other.controller as MyEntityController;
               if (!controller) return;
 
+              // Check if player already has a potion
+              if (controller.potion) {
+                world.chatManager.sendBroadcastMessage(
+                  `${other.name} already has a potion!`,
+                  'FF0000' // Red text for error
+                );
+                return;
+              }
+
               // Create child entity attached to player
               const potionChild = new Entity({
                 name: 'water_potion_child',
@@ -668,8 +696,8 @@ function createWaterPotion(world: World, position: { x: number, y: number, z: nu
 
               potionChild.spawn(
                 world,
-                { x: 0.3, y: 0.1, z: 0.2 }, // Offset from hand
-                Quaternion.fromEuler(-90, 0, 0), // Rotate to stand upright in hand
+                { x: 0.3, y: 0.1, z: 0.2 },
+                Quaternion.fromEuler(-90, 0, 0),
               );
 
               // Store potion reference in controller
@@ -680,7 +708,7 @@ function createWaterPotion(world: World, position: { x: number, y: number, z: nu
 
               world.chatManager.sendBroadcastMessage(
                 `${other.name} picked up a water potion! Press E to use it.`,
-                '00FFFF' // Cyan color
+                '00FFFF'
               );
             }
           }
@@ -1066,8 +1094,10 @@ function cleanupGameState(world: World) {
     }
   });
 
-  // Reset all players
-  const allPlayers = [...RED_TEAM_PLAYERS, ...BLUE_TEAM_PLAYERS];
+  // Reset all players, including spectators
+  const allPlayers = world.entityManager.getAllEntities()
+    .filter(e => e instanceof PlayerEntity) as PlayerEntity[];
+
   allPlayers.forEach(playerEntity => {
     const controller = playerEntity.controller as MyEntityController;
     if (controller) {
@@ -1083,7 +1113,7 @@ function cleanupGameState(world: World) {
       // Clear team
       controller.team = undefined;
     }
-    // Reset position
+    // Reset position to main spawn for all players
     playerEntity.setPosition({ x: 0, y: 10, z: 0 });
   });
 
@@ -1189,8 +1219,14 @@ function endGame(world: World) {
   const winner = gameData.redScore > gameData.blueScore ? 'red' : 
                 gameData.blueScore > gameData.redScore ? 'blue' : 'tie';
   
-  // Play victory fanfare
-  VICTORY_FANFARE.play(world);
+  // Play victory fanfare - Make sure it plays by setting position and reference distance
+  const fanfare = new Audio({
+    uri: 'audio/trumpet.mp3',
+    volume: 0.7,
+    position: { x: 0, y: 10, z: 0 }, // Center of map, slightly elevated
+    referenceDistance: 100, // Large reference distance so everyone can hear it
+  });
+  fanfare.play(world, true); // Use true to ensure it plays for everyone
   
   // Announce results
   if (winner === 'tie') {
@@ -1200,23 +1236,11 @@ function endGame(world: World) {
   }
   world.chatManager.sendBroadcastMessage(`Final Scores - Red: ${gameData.redScore}, Blue: ${gameData.blueScore}`, 'FFFF00');
   
-  // Move spectators back to spawn
-  SPECTATOR_STATES.forEach(spectator => {
-    if (spectator.isSpawned) {
-      spectator.setPosition({ x: 0, y: 10, z: 0 });
-      world.chatManager.sendBroadcastMessage(
-        `${spectator.name} can now join a team!`,
-        '00FF00'
-      );
-    }
-  });
-  SPECTATOR_STATES.clear();
-
   // Reset game state after delay
   setTimeout(() => {
     cleanupGameState(world);
     world.chatManager.sendBroadcastMessage('Game reset! Join a team to start a new game!', '00FF00');
-  }, 10000);
+  }, 10000); // 10 second delay
 }
 
 // Update tag handling function
@@ -1474,12 +1498,11 @@ startServer(world => {
       controller: new MyEntityController(),
     });
 
-    // If game is active, move to spectator position
+    // If round is active, spawn at spectator position
     if (gameData.isRoundActive) {
       playerEntity.spawn(world, SPECTATOR_POSITION);
-      SPECTATOR_STATES.add(playerEntity);
       world.chatManager.sendBroadcastMessage(
-        `${playerEntity.name} is now spectating! Join a team when the round ends.`,
+        `${randomName} joined as spectator (round in progress)`,
         'FFFF00'
       );
     } else {
@@ -1560,8 +1583,6 @@ startServer(world => {
       }
     };
 
-    playerEntity.spawn(world, { x: 0, y: 10, z: 0 });
-    
     // Send current game state
     updateUiState(world);
     
@@ -1571,10 +1592,8 @@ startServer(world => {
     world.chatManager.sendBroadcastMessage('1. Join a team by approaching the team captains', '00FF00');
     world.chatManager.sendBroadcastMessage('2. Steal the enemy team\'s sword and bring it to your side', '00FF00');
     world.chatManager.sendBroadcastMessage('3. Tag enemy players to freeze them for 10 seconds', '00FF00');
-    world.chatManager.sendBroadcastMessage('4. Tagging a sword holder/scoring will reset all players', '00FF00');
+    world.chatManager.sendBroadcastMessage('4. If you\'re carrying a sword and get tagged, the sword resets', '00FF00');
     world.chatManager.sendBroadcastMessage('5. Team with most points after 5 minutes wins!', '00FF00');
-    world.chatManager.sendBroadcastMessage('6. ALLOW YOUR PLAYER TO REST BEFORE THE GAME STARTS!!!', '00FF00');
-
   };
 
   world.onPlayerLeave = player => {

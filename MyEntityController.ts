@@ -146,6 +146,9 @@ export default class MyEntityController extends BaseEntityController {
   }
 
   public set potion(value: Entity | undefined) {
+    if (value && this._potion) {
+      return;
+    }
     this._potion = value;
   }
 
